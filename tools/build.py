@@ -8,6 +8,7 @@ Steps:
   3. Compile deskcal.py → C → machine code with Nuitka (no bytecode in output)
   4. Bundle fonts + icon, copy docs, zip it and print the SHA-256
 """
+import argparse
 import hashlib
 import os
 import re
@@ -30,11 +31,24 @@ def run(*cmd):
 
 
 def version():
-    src = open(os.path.join(ROOT, "deskcal.py"), encoding="utf-8").read()
+    with open(os.path.join(ROOT, "deskcal.py"), encoding="utf-8") as file:
+        src = file.read()
     return re.search(r'^__version__ = "([\d.]+)"', src, re.M).group(1)
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--anki-host', default=os.path.join(BUILD, 'anki-host'),
+                        help='compiled CardHost.exe, WebView2 Core/loader DLLs and SDK license')
+    args = parser.parse_args()
+    host_names = ('CardHost.exe', 'Microsoft.Web.WebView2.Core.dll', 'WebView2Loader.dll', 'WEBVIEW2-LICENSE.txt')
+    host_payload = {}
+    for name in host_names:
+        path = os.path.join(args.anki_host, name)
+        if not os.path.isfile(path):
+            parser.error('Missing %s; first run tools/build_anki_host.py --sdk SDK_DIRECTORY' % path)
+        with open(path, 'rb') as file:
+            host_payload[name] = file.read()
     ver = version()
 
     # --- Step 1: Build environment ---
@@ -53,6 +67,12 @@ def main():
     if os.path.exists(BUILD):
         shutil.rmtree(BUILD)
     os.makedirs(BUILD)
+    # Preserve the host before cleaning BUILD; its default directory is inside it.
+    host_stage = os.path.join(BUILD, 'anki-host')
+    os.makedirs(host_stage)
+    for name, content in host_payload.items():
+        with open(os.path.join(host_stage, name), 'wb') as file:
+            file.write(content)
     icon = os.path.join(BUILD, "deskcal.ico")
     run(VPY, os.path.join(ROOT, "tools", "make_icon.py"), icon)
 
@@ -69,6 +89,7 @@ def main():
         # Fonts + icon
         "--include-data-dir=" + os.path.join(ROOT, "fonts") + "=fonts",
         "--include-data-file=" + os.path.join(ROOT, "docs", "icon.png") + "=icon.png",
+        "--include-data-file=" + os.path.join(ROOT, "anki_webview", "card.html") + "=anki_webview/card.html",
         # Output
         "--output-dir=" + out,
         "--remove-output",
@@ -93,10 +114,15 @@ def main():
 
     # --- Step 4: Package ---
     print("\n[3/4] Copying docs + licenses ...")
-    for name in ("README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+    for name in ("README.md", "README-ANKI.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         src = os.path.join(ROOT, name)
         if os.path.exists(src):
             shutil.copy(src, app)
+    # The external .NET host needs its own side-by-side DLLs, not Python imports.
+    runtime = os.path.join(app, 'anki_webview')
+    os.makedirs(runtime, exist_ok=True)
+    for name in host_names:
+        shutil.copy2(os.path.join(host_stage, name), os.path.join(runtime, name))
     # License texts
     lic = os.path.join(app, "licenses")
     os.makedirs(lic, exist_ok=True)
@@ -120,7 +146,8 @@ def main():
             for f in files:
                 full = os.path.join(base, f)
                 z.write(full, os.path.join("DeskCal", os.path.relpath(full, app)))
-    digest = hashlib.sha256(open(zpath, "rb").read()).hexdigest()
+    with open(zpath, "rb") as file:
+        digest = hashlib.sha256(file.read()).hexdigest()
     with open(zpath + ".sha256", "w") as f:
         f.write("%s  %s\n" % (digest, os.path.basename(zpath)))
     print("\n%s  (%.1f MB)\nSHA-256: %s" % (zpath, os.path.getsize(zpath) / 1e6, digest))

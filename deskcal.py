@@ -27,6 +27,7 @@ import winreg
 import zipfile
 import zlib
 from tkinter import filedialog
+from anki_tab import AnkiTab
 
 __version__ = "1.3.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1581,8 +1582,8 @@ EXAM_PARTS = {"上午": "part_am", "下午": "part_pm", "晚上": "part_eve"}
 
 COMPACT = (320, 520)        # 컴팩트 모드의 창 크기 (100% 배율 기준)
 REPEATS = ["", "weekly", "biweekly", "monthly"]
-RELEASES_API = "https://api.github.com/repos/HANSEIDON/DeskCal/releases/latest"
-RELEASES_PAGE = "https://github.com/HANSEIDON/DeskCal/releases/latest"
+RELEASES_API = "https://api.github.com/repos/Z3O1/DeskCal/releases/latest"
+RELEASES_PAGE = "https://github.com/Z3O1/DeskCal/releases/latest"
 BACKUP_TYPES = {"events.json": dict, "series.json": list, "timetable.json": dict,
                 "courses.json": dict, "config.json": dict}
 
@@ -1867,7 +1868,7 @@ def version_tuple(v):
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3])
 
 
-RELEASES_DL = "https://github.com/HANSEIDON/DeskCal/releases/download/"
+RELEASES_DL = "https://github.com/Z3O1/DeskCal/releases/download/"
 
 
 def fetch_release(timeout=8):
@@ -1957,6 +1958,11 @@ class DeskCal(tk.Tk):
         if not isinstance(self.series, list):
             self.series, self.sr_ok = [], False
         self.conf, _ = load_json(CONF_FILE, {})
+        # Never offer an upstream installer cached by the original DeskCal.
+        if self.conf.get("update_source") != RELEASES_API:
+            self.conf = {k: v for k, v in self.conf.items()
+                         if not k.startswith("update_") or k == "update_check"}
+            self.conf["update_source"] = RELEASES_API
         if "week_ranges" not in self.conf and any(it.get("weeks") for _, it in all_items(self.tt)):
             self.conf["week_ranges"] = True        # 이미 주차 범위를 쓰고 있었다
         self.normalize_exam_dates()
@@ -1965,6 +1971,8 @@ class DeskCal(tk.Tk):
         self.theme = self.conf.get("theme") if self.conf.get("theme") in THEMES else "dark"
         apply_theme(self.theme)
         self.view = self.conf.get("view", "cal")
+        if self.view not in ("cal", "tt"):
+            self.view = "cal"  # Anki is entered only by clicking its tab.
         self.weekend_tt = bool(self.conf.get("weekend_tt", False))
         self.tt_sel = (0, 1)
         self._tt_adding = False        # 고른 칸에 다른 주의 수업을 새로 적는 중
@@ -2052,6 +2060,7 @@ class DeskCal(tk.Tk):
         self.dpi = max(1.0, self.winfo_fpixels("1i") / 96.0)
         x = self.conf.get("x", self.winfo_screenwidth() - self.w() - 60)
         self.geometry("+%d+%d" % (x, self.conf.get("y", 60)))
+        self.anki = AnkiTab(self, sys.modules[__name__])
         self.build()
 
         self.update_idletasks()
@@ -2102,6 +2111,8 @@ class DeskCal(tk.Tk):
         log("콜백 예외:\n" + "".join(traceback.format_exception(exc, val, tb)))
 
     def destroy(self):
+        if hasattr(self, "anki"):
+            self.anki.close()
         # 예약해 둔 타이머를 먼저 끊는다. 안 그러면 창이 사라진 뒤에 깨어나 오류를 낸다.
         jobs = list(getattr(self, "_jobs", {}).values())
         jobs += [getattr(self, "_status_job", None), getattr(self, "_tip_job", None),
@@ -2857,6 +2868,7 @@ class DeskCal(tk.Tk):
                 if c.itemcget(it, "image") != str(self.glass_img):
                     c.itemconfig(it, image=self.glass_img)
                 c.coords(it, ix - ox, iy - oy)
+        self.anki.paint()
 
     def desk_ready(self):
         """미리 만든 바탕화면 유리가 지금 색·투명도·화면 크기에 맞는지."""
@@ -2998,8 +3010,8 @@ class DeskCal(tk.Tk):
                 self.head_button("b_today", x - gap, cy, self.t("today"),
                                  lambda e: self.go_today())
             return
-        for key in ("tt", "cal"):                # 달력 / 시간표 전환
-            x = self.head_button("b_" + key, x - gap, cy, self.t(key),
+        for key in ("tt", "anki", "cal"):        # Calendar / Anki / Timetable
+            x = self.head_button("b_" + key, x - gap, cy, "Anki" if key == "anki" else self.t(key),
                                  lambda e, k=key: self.set_view(k), active=self.view == key)
         if self.view == "cal":                   # 시간표에는 월 이동이 의미가 없다
             x -= self.px(10)
@@ -3031,7 +3043,13 @@ class DeskCal(tk.Tk):
         c.tag_bind(tag, "<Enter>", enter, add="+")
         c.tag_bind(tag, "<Leave>", lambda _: self.hide_tip(), add="+")
 
-    def set_view(self, key):
+    def set_view(self, key, _anki_ready=False):
+        if key == "anki" and not _anki_ready:
+            if not self.compact:
+                self.anki.enter()
+            return
+        if key != "anki":
+            self.anki.generation += 1
         self.tt_commit()                       # 화면을 바꾸기 전에 저장
         if key == self.view or self.compact:
             return
@@ -3051,6 +3069,9 @@ class DeskCal(tk.Tk):
     def draw(self):
         if self.compact:
             return
+        if self.view == "anki":
+            self.anki.paint()
+            return
         if self.view == "tt":
             self.draw_tt()
         else:
@@ -3063,6 +3084,13 @@ class DeskCal(tk.Tk):
             self.on_grid_click(e)
 
     def render(self):
+        if self.anki.active():
+            self.anki.render()
+            return
+        self.anki.hide()
+        self.base.itemconfigure(self._cal_win, state="hidden" if self.compact else "normal")
+        for item in ("panel_bg", self._panel_win):
+            self.base.itemconfigure(item, state="normal")
         if self.compact:
             self.set_title(self.day_title(self.selected))
         elif self.view == "tt":
@@ -5093,7 +5121,10 @@ class DeskCal(tk.Tk):
 
     def close_mode(self):
         self.panel_mode = "day"
-        self.render_panel()
+        if self.anki.active():
+            self.render()
+        else:
+            self.render_panel()
 
     def scroll_area(self, parent):
         """휠로 넘기는 세로 목록. 안쪽 프레임을 돌려준다."""
@@ -5202,7 +5233,10 @@ class DeskCal(tk.Tk):
         """≡ 또는 우클릭: 오른쪽 카드에 설정을 연다 (다시 누르면 닫는다)."""
         self.tt_commit()
         self.panel_mode = "day" if self.panel_mode == "settings" else "settings"
-        self.render_panel()
+        if self.anki.active():
+            self.render()
+        else:
+            self.render_panel()
 
     def seg(self, parent, label, options, cmd):
         """이름 한 줄 + 고르는 버튼들. options: [(값, 글, 켜짐)]. 폭이 모자라면 줄을 바꾼다."""
@@ -5614,6 +5648,9 @@ class DeskCal(tk.Tk):
             self.undo_stack.pop(0)
 
     def undo(self, _=None):
+        if self.anki.active():
+            self.anki.undo()
+            return "break"
         if not self.undo_stack:
             return "break"
         snap = json.loads(self.undo_stack.pop())

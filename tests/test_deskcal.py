@@ -9,6 +9,15 @@ import json
 import os
 import shutil
 import sys
+
+# Visible upstream Tk regression tests require fresh explicit desktop permission.
+# Never let generic test discovery accidentally flash windows on the user's desktop.
+if os.environ.get("DESKCAL_ALLOW_DESKTOP_TESTS") != "1":
+    if __name__ == "__main__":
+        raise SystemExit("Desktop GUI tests disabled. Use tools/test_anki_headless.py instead.")
+    import unittest
+    raise unittest.SkipTest("Visible Windows tests require explicit isolated-desktop permission")
+
 try:
     sys.stdout.reconfigure(encoding='utf-8')
 except Exception:

@@ -1,3 +1,5 @@
+> **Anki fork 开发版：** 在原版 DeskCal 中新增 Anki 页签。实现、依赖与验证状态见 [README-ANKI.md](README-ANKI.md)。下文原版 Releases 不包含此功能。
+
 <div align="center">
 
 <img src="docs/icon.png" width="96" alt="DeskCal icon">

@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<base href="https://deskcal.invalid/media/">
+<link rel="stylesheet" href="/_anki/css/webview.css">
+<link rel="stylesheet" href="/_anki/css/reviewer.css">
+<style>
+html, html body, html body.card, html body #qa { background: transparent !important; }
+html { scrollbar-color: var(--fg-subtle) transparent; }
+</style>
+<script>
+(() => {
+  let seq = null, phase = null, signature = null, goodIndex = 2;
+  const send = action => window.chrome.webview.postMessage({seq, ...action});
+  const flip = () => send({action: 'flip'});
+  window.deskcalActivate = flip;
+  window.pycmd = window.bridgeCommand = (cmd, cb) => {
+    if (cmd === 'ans') flip();
+    else if (cmd === 'play' || /^play:[qa]:\d+$/.test(cmd)) send({action: 'audio'});
+    if (typeof cb === 'function') cb(null);
+  };
+  window.chrome.webview.addEventListener('message', ({data: card}) => {
+    seq = card.seq;
+    phase = card.phase;
+    goodIndex = Math.max(0, (card.buttons || []).findIndex(([rating]) => rating === 'good'));
+    if (!['question', 'answer'].includes(phase)) return;
+    const next = JSON.stringify([card.card_id, card.phase, card.html, card.classes, card.theme, card.zoom]);
+    if (next === signature) return;
+    signature = next;
+    const dark = card.theme === 'dark';
+    document.documentElement.classList.toggle('night-mode', dark);
+    document.documentElement.dataset.bsTheme = dark ? 'dark' : 'light';
+    const classes = card.classes + (dark ? ' nightMode night_mode' : '');
+    if (phase === 'question') _showQuestion(card.html, '', classes);
+    else _showAnswer(card.html, classes);
+    document.getElementById('qa').style.zoom = String(card.zoom || 1);
+    _drawFlag(card.flag || 0);
+  });
+  document.addEventListener('keydown', e => {
+    const editing = !!e.target.closest?.('input,textarea,[contenteditable="true"]');
+    if (!editing && !e.repeat && e.ctrlKey && !e.altKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault(); send({action: 'undo'}); return;
+    }
+    if (e.defaultPrevented || e.repeat || e.ctrlKey || e.altKey || e.metaKey || editing) return;
+    if (e.key === ' ' || e.key === 'Enter') {
+      if (e.key === 'Enter' && e.target.closest?.('a,button,summary')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (phase === 'question') flip();
+      else send({action: 'rate', index: goodIndex});
+    } else if (/^[1-4]$/.test(e.key)) {
+      e.preventDefault(); send({action: 'rate', index: Number(e.key) - 1});
+    } else if (e.key.toLowerCase() === 'r') send({action: 'audio'});
+  }, true);
+})();
+</script>
+<script defer src="/_anki/js/reviewer.js"></script>
+</head><body><div id="_mark" hidden>★</div><div id="_flag" hidden>⚑</div><div id="qa" dir="auto"></div></body></html>

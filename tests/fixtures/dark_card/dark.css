@@ -1,0 +1,2 @@
+/* Synthetic fixture; real installed plugin CSS can be supplied with --dark-card. */
+body[class*="night"] font[color="navy"] { color: #9dc4ff !important; }

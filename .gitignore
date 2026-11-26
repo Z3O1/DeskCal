@@ -11,3 +11,6 @@ dist/
 .build-venv/
 mingw.zip
 mingw*/
+
+# Generated integration-test captures (not release documentation)
+docs/anki-tab-*.png
