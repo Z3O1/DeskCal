@@ -97,8 +97,11 @@ def test(temp, screenshots):
         def log_message(self, *_):
             pass
 
+    settings_path = temp / 'anki-connect.json'
+    settings = {'endpoint': 'http://127.0.0.1:1/api/v1', 'api_key': 'test-secret',
+                'deck': 'Words', 'timeout': .25, 'addons_dir': str(temp/'isolated-addons')}
+    settings_path.write_text(json.dumps(settings), encoding='utf-8')
     app = d.DeskCal()
-    app.anki.effects.addons = temp / 'isolated-addons'
     app.attributes('-topmost', True)
     def shot(name, glass_check=False):
         for _ in range(12):
@@ -126,15 +129,14 @@ def test(temp, screenshots):
         assert app.base.bbox('b_cal')[2] < app.base.bbox('b_anki')[0] < app.base.bbox('b_tt')[0]
         size, selected, shown, conf = (app.w(), app.h()), app.selected, app.shown, dict(app.conf)
         shot('anki-tab-calendar.png')
-        app.anki.client.endpoint = 'http://127.0.0.1:1/api/v1'
-        app.anki.client.timeout = .25
         app.set_view('anki')
         until(app, lambda: not app.anki.busy, 'offline request did not finish')
-        assert app.view == 'cal' and app.conf == conf and stats['requests'] == 0
-        assert not app.anki.host
-        app.anki.client.endpoint = f'http://127.0.0.1:{server.server_port}/api/v1'
-        app.anki.client.key = 'test-secret'
-        app.anki.client.deck = 'Words'
+        assert app.view == 'anki' and stats['requests'] == 0
+        assert app.conf['view'] == 'anki'
+        assert not app.anki.host and app.anki.canvas.find_withtag('anki-status')
+        assert app.anki.canvas.find_withtag('anki-retry')
+        settings['endpoint'] = f'http://127.0.0.1:{server.server_port}/api/v1'
+        settings_path.write_text(json.dumps(settings), encoding='utf-8')
         app.set_view('anki')
         until(app, lambda: app.view == 'anki' and app.anki.ready, 'Anki page did not open')
         host = app.anki.host
@@ -171,7 +173,7 @@ def test(temp, screenshots):
         assert stats['answers'] == 1
         app.set_view('cal')
         assert not app.anki.active() and app.base.itemcget(app._panel_win, 'state') == 'normal'
-        print('PASS: original Calendar/Timetable/settings, offline no-op, full-page template HTML/JS/media, real transparency, intervals, guarded rating, tab restore')
+        print('PASS: original Calendar/Timetable/settings, offline status/retry, full-page template HTML/JS/media, real transparency, intervals, guarded rating, tab restore')
     finally:
         app.destroy()
         if host:

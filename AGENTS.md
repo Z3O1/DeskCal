@@ -2,7 +2,8 @@
 
 - Fork of `HANSEIDON/DeskCal`, upstream baseline `e6c62fc` (1.3.2).
 - Keep the original Tk/Win32 shell, wallpaper glass, Calendar, Timetable, dimensions and gear/settings. Add Anki as a peer tab, using the full content area.
-- Anki tab connects ONLY to an already running Anki through standard AnkiConnect v1. If unavailable, clicking must not change the current view, launch Anki, or show a dialog.
+- Anki tab ALWAYS opens, even if Anki is closed. Without a connection it must display `未连接到 Anki` inside the page, with an explicit retry action; never launch Anki or show a modal dialog. It connects only to an already running Anki via standard AnkiConnect v1.
+- Losing the connection keeps the Anki page visible, clears stale cards and disables review actions. Do not automatically navigate Anki/start review while disconnected; retry is a user action and reloads local port/key settings.
 - No DeskCal-specific Anki add-on; the old `anki_deskcal` add-on was backed up and removed.
 - Never open the personal collection directly, modify its stored templates, or close/restart/start the user's Anki automatically.
 - Keep original rendered HTML/CSS/JS/media. Apply background transparency only at runtime. Preserve the existing dark-card CSS and Zoom settings via read-only compatibility; do not claim universal add-on compatibility.

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from anki_tab import AnkiTab
+from anki_tab import AnkiTab, DISCONNECTED_TEXT
 from test_anki_api import state
 
 
@@ -47,6 +47,9 @@ class App:
         self.trace.append(('view', view))
         self.view = view
 
+    def render(self):
+        self.trace.append(('render', self.view))
+
 
 class Tests(unittest.TestCase):
     def setUp(self):
@@ -59,8 +62,9 @@ class Tests(unittest.TestCase):
             self.tab = AnkiTab(self.app, style)
         self.tab.exe = Path('/fake/host.exe')
         self.tab.assets = Path('/fake/assets')
+        self.tab.reload_client = MagicMock()
 
-    def test_offline_click_does_not_switch_or_spawn(self):
+    def test_offline_click_opens_anki_page_without_spawning(self):
         before = copy.deepcopy(self.app.conf)
         def fail():
             raise ConnectionRefusedError()
@@ -69,22 +73,28 @@ class Tests(unittest.TestCase):
             item = self.tab.inbox.get(timeout=2)
             self.tab.inbox.put(item)
             self.tab.tick()
-        self.assertEqual(self.app.view, 'cal')
+        self.assertEqual(self.app.view, 'anki')
         self.assertEqual(self.app.conf, before)
-        self.assertEqual(self.app.trace, [])
+        self.assertEqual(self.app.trace, [('view', 'anki')])
+        self.assertIsNone(self.tab.session)
+        self.assertIsNone(self.tab.state)
+        self.assertFalse(self.tab.connecting)
+        self.assertIn('AnkiConnect', self.tab.connection_hint)
         spawn.assert_not_called()
         self.assertFalse(self.tab.busy)
 
-    def test_original_gate_does_not_commit_calendar_when_offline(self):
+    def test_tab_switch_commits_timetable_before_offline_page(self):
         app = Navigation()
         app.view, app.compact, app.conf = 'tt', False, {'view': 'tt'}
         app.anki = MagicMock()
-        app.tt_commit = MagicMock()
+        for name in ('tt_commit', 'close_picker', 'hide_tip', 'draw_header', 'render', 'save_conf'):
+            setattr(app, name, MagicMock())
+        app.anki.enter.side_effect = lambda: app.set_view('anki', _anki_select=True)
         app.set_view('anki')
         app.anki.enter.assert_called_once()
-        app.tt_commit.assert_not_called()
-        self.assertEqual(app.view, 'tt')
-        self.assertEqual(app.conf, {'view': 'tt'})
+        app.tt_commit.assert_called_once()
+        self.assertEqual(app.view, 'anki')
+        self.assertEqual(app.conf, {'view': 'anki'})
 
     def test_original_tabs_continue_to_commit_and_render_normally(self):
         app = Navigation()
@@ -122,13 +132,78 @@ class Tests(unittest.TestCase):
         self.assertEqual(app.undo_stack, ['calendar-state'])
 
     def test_new_media_mapping_precedes_new_card_render(self):
+        self.app.view = 'anki'
         self.tab.host = MagicMock()
         self.tab.host.poll.return_value = None
         self.tab.send_media = lambda: self.app.trace.append(('media', self.tab.media))
         self.tab.display = lambda: self.app.trace.append(('card', self.tab.state))
         self.tab.entered({'session': 'new-session', 'media': 'new-media', 'review': state()})
         self.assertEqual(self.app.trace[0], ('media', 'new-media'))
-        self.assertEqual(self.app.trace[1], ('view', 'anki'))
+        self.assertEqual(self.app.trace[1], ('render', 'anki'))
+
+    def test_disconnected_message_is_visible_without_a_browser(self):
+        self.app.w, self.app.h = lambda: 640, lambda: 420
+        self.app.pad, self.app.head_h = 18, 66
+        self.app.px, self.app.f = lambda v: round(v), lambda *args: 'font'
+        self.tab.d.FG, self.tab.d.MUTED = 'white', 'gray'
+        self.tab.canvas = MagicMock()
+        self.tab.status()
+        texts = [c.kwargs['text'] for c in self.tab.canvas.create_text.call_args_list]
+        self.assertIn(DISCONNECTED_TEXT, texts)
+        self.assertIsNone(self.tab.browser_canvas)
+        self.assertIsNone(self.tab.host)
+
+    def test_offline_tab_can_retry_without_leaving_page(self):
+        self.app.view = 'anki'
+        self.tab.run = MagicMock()
+        self.tab.enter()
+        self.tab.enter()
+        self.assertEqual(self.tab.run.call_count, 2)
+        self.assertEqual(self.app.trace, [])
+        self.assertEqual(self.tab.reload_client.call_count, 2)
+
+    def test_connection_loss_stays_on_anki_page_and_clears_card(self):
+        self.app.view = 'anki'
+        self.tab.session, self.tab.state, self.tab.seq = 'session', state(), 7
+        self.tab.refresh_job = self.app.after(1000, lambda: None)
+        self.tab.disconnected(ConnectionRefusedError())
+        self.assertEqual(self.app.view, 'anki')
+        self.assertEqual(self.app.trace, [])
+        self.assertIsNone(self.tab.state)
+        self.assertIsNone(self.tab.session)
+        self.assertIsNone(self.tab.refresh_job)
+        self.assertEqual(self.tab.seq, 8)
+
+    def test_no_automatic_review_attempt_while_disconnected(self):
+        self.app.view = 'anki'
+        self.tab.run = MagicMock()
+        self.tab.refresh()
+        self.tab.run.assert_not_called()
+        self.assertIsNone(self.tab.refresh_job)
+
+    def test_offline_review_and_undo_do_not_call_the_api(self):
+        self.app.view = 'anki'
+        self.tab.ready = True
+        self.tab.run = MagicMock()
+        self.tab.flip()
+        self.tab.rate(0)
+        self.tab.audio()
+        self.tab.undo()
+        self.tab.run.assert_not_called()
+
+    def test_retry_reloads_explicit_connection_configuration(self):
+        self.tab.config_path.write_text(json.dumps({'endpoint': 'http://127.0.0.1:8766/api/v1', 'api_key': 'new-test-key'}))
+        with patch('anki_tab.find_web_assets', return_value=Path('/fake/assets')):
+            AnkiTab.reload_client(self.tab)
+        self.assertEqual(self.tab.client.endpoint, 'http://127.0.0.1:8766/api/v1')
+        self.assertEqual(self.tab.client.key, 'new-test-key')
+
+    def test_connected_active_tab_does_not_start_a_second_review(self):
+        self.app.view = 'anki'
+        self.tab.session = 'session'
+        self.tab.run = MagicMock()
+        self.tab.enter()
+        self.tab.run.assert_not_called()
 
     def test_closed_old_host_cannot_close_new_host(self):
         self.app.view = 'anki'

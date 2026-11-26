@@ -11,6 +11,10 @@ import tkinter as tk
 from anki_api import AnkiClient, BIDI, display_card
 from anki_effects import InstalledCardEffects
 
+DISCONNECTED_TEXT = '未连接到 Anki'
+CONNECTING_TEXT = '正在连接 Anki…'
+RETRY_TEXT = '重新连接'
+
 LABELS = {
     'en': dict(again='Again', hard='Hard', good='Good', easy='Easy', flip='Show Answer', done='No cards due', loading='Loading card…'),
     'zh': dict(again='重来', hard='困难', good='良好', easy='简单', flip='显示答案', done='没有待学卡片', loading='正在加载卡面…'),
@@ -34,13 +38,17 @@ def find_web_assets(configured=None):
 class AnkiTab:
     def __init__(self, app, style):
         self.app, self.d = app, style
-        self.client = AnkiClient.from_file(Path(style.APP_DIR) / 'anki-connect.json')
+        self.config_path = Path(style.APP_DIR) / 'anki-connect.json'
+        self.client = AnkiClient.from_file(self.config_path)
         self.effects = InstalledCardEffects(self.client.settings.get('addons_dir'))
         self.session = self.media = self.state = None
         self.previous = 'cal'
         self.generation = self.seq = 0
         self.busy = self.ready = self.closed = False
-        self.canvas = self.window = self.host = None
+        self.connecting = False
+        self.connection_hint = ''
+        self.renderer_error = False
+        self.canvas = self.browser_canvas = self.window = self.host = None
         self.inbox = queue.Queue()
         self.tick_job = self.refresh_job = None
         self.signature = self.bounds = None
@@ -49,16 +57,47 @@ class AnkiTab:
                                     self.root / 'anki_webview/CardHost.exe') if p.is_file()), None)
         self.assets = find_web_assets(self.client.settings.get('web_assets'))
 
+    def reload_client(self):
+        # Retry also picks up a changed local AnkiConnect port/key after its restart.
+        self.client = AnkiClient.from_file(self.config_path)
+        self.effects = InstalledCardEffects(self.client.settings.get('addons_dir'))
+        self.assets = find_web_assets(self.client.settings.get('web_assets'))
+
     def active(self):
         return self.app.view == 'anki' and not self.app.compact
 
     def enter(self):
-        if self.closed or self.busy or self.active():
+        if self.closed:
+            return
+        was_active = self.active()
+        if was_active and (self.busy or (self.session is not None and not self.renderer_error)):
+            return
+        if not was_active:
+            self.previous = self.app.view
+        self.session = self.media = self.state = None
+        self.connecting = False
+        self.renderer_error = False
+        self.connection_hint = ''
+        # Selecting the tab never depends on a live Anki connection.
+        if not was_active:
+            self.app.set_view('anki', _anki_select=True)
+        if self.busy:
+            self.paint()
+            return
+        try:
+            self.reload_client()
+        except Exception as error:
+            self.d.log('Anki tab configuration failed: ' + self.error_code(error))
+            self.disconnected(error)
             return
         if not self.exe or not self.assets:
+            self.renderer_error = True
+            self.connection_hint = '缺少 WebView2 宿主或 Anki 网页资源'
             self.d.log('Anki tab: build the WebView2 host and install Anki web resources first')
+            self.paint()
             return
-        self.previous = self.app.view
+        self.connecting = True
+        self.paint()
         self.run(self.client.enter, self.entered, entering=True)
 
     def run(self, function, callback, entering=False):
@@ -76,15 +115,18 @@ class AnkiTab:
         self.ensure_tick()
 
     def entered(self, result):
-        if self.app.view != self.previous:
+        if not self.active():
             return
+        self.connecting = False
+        self.renderer_error = False
+        self.connection_hint = ''
         self.session, self.media = result['session'], result['media']
         self.state = result['review']
         self.signature = None
-        # Update the native resource mapping before set_view() publishes HTML.
+        # Update media routing before publishing a card from a new session.
         if self.host and self.host.poll() is None:
             self.send_media()
-        self.app.set_view('anki', _anki_ready=True)
+        self.app.render()
         if not self.host or self.host.poll() is not None:
             self.host = None
             self.ready = False
@@ -97,7 +139,7 @@ class AnkiTab:
         self.app.update_idletasks()
         try:
             profile = str(Path(self.d.APP_DIR) / 'anki-webview-profile')
-            self.host = subprocess.Popen([str(self.exe), str(self.canvas.winfo_id()),
+            self.host = subprocess.Popen([str(self.exe), str(self.browser_canvas.winfo_id()),
                                           str(self.root / 'anki_webview/card.html'), str(self.assets), profile],
                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -107,7 +149,7 @@ class AnkiTab:
             self.ensure_tick()
         except OSError:
             self.d.log('Anki tab: WebView2 host failed to start')
-            self.leave()
+            self.disconnected(renderer=True)
 
     def read_host(self, host):
         buffer = b''
@@ -139,7 +181,8 @@ class AnkiTab:
 
     def ensure_tick(self):
         if self.tick_job is None and not self.closed:
-            self.tick_job = self.app.after(40 if self.active() or self.busy else 400, self.tick)
+            fast = self.busy or (self.active() and self.session is not None)
+            self.tick_job = self.app.after(40 if fast else 400, self.tick)
 
     def tick(self):
         self.tick_job = None
@@ -154,10 +197,8 @@ class AnkiTab:
                     if generation != self.generation:
                         continue
                     if error:
-                        # Offline entry leaves every existing calendar state unchanged.
-                        if not entering:
-                            self.d.log('Anki tab request failed: ' + type(error).__name__)
-                            self.leave()
+                        self.d.log('Anki tab request failed: ' + self.error_code(error))
+                        self.disconnected(error)
                     else:
                         callback(value)
                 elif item[1] is self.host:
@@ -199,8 +240,7 @@ class AnkiTab:
                     pass
                 self.host = None
             self.d.log('Anki tab: renderer unavailable')
-            if self.active():
-                self.leave()
+            self.disconnected(renderer=True)
 
     def schedule_refresh(self):
         if self.refresh_job:
@@ -209,7 +249,7 @@ class AnkiTab:
 
     def refresh(self):
         self.refresh_job = None
-        if self.closed or not self.active():
+        if self.closed or not self.active() or self.session is None:
             return
         if not self.busy:
             self.run(lambda: self.client.current(self.session), self.updated)
@@ -219,9 +259,32 @@ class AnkiTab:
         self.state = state
         self.display()
 
+    @staticmethod
+    def error_code(error):
+        code = type(error).__name__
+        if hasattr(error, 'code'):
+            code += ' ' + str(error.code)
+        return code
+
+    def disconnected(self, error=None, renderer=False):
+        self.connecting = False
+        self.renderer_error = renderer
+        self.session = self.media = self.state = None
+        self.signature = None
+        self.seq += 1  # Ignore messages from a no-longer-visible card.
+        self.connection_hint = ('卡片渲染器未就绪，请检查安装组件' if renderer else
+                                '请确认 Anki 已打开且 AnkiConnect 已启用')
+        if error is not None:
+            self.connection_hint += '（' + self.error_code(error) + '）'
+        if self.refresh_job:
+            self.app.after_cancel(self.refresh_job)
+            self.refresh_job = None
+        self.paint()
+        self.place(force=True)
+
     def can_act(self):
         return (self.active() and self.app.panel_mode != 'settings' and self.ready and not self.busy
-                and self.state and self.state.get('active'))
+                and self.session is not None and self.state and self.state.get('active'))
 
     def flip(self):
         if self.can_act() and self.state['side'] == 'question':
@@ -241,7 +304,7 @@ class AnkiTab:
             self.run(lambda: self.client.audio(self.session, token), self.updated)
 
     def undo(self):
-        if self.active() and not self.busy and self.app.panel_mode != 'settings':
+        if self.active() and self.session is not None and not self.busy and self.app.panel_mode != 'settings':
             def work():
                 self.client.call('collection.undo', session=self.session)
                 return self.client.current(self.session)
@@ -272,6 +335,10 @@ class AnkiTab:
             self.canvas = tk.Canvas(app.base, highlightthickness=0, bd=0)
             self.window = app.base.create_window(app.pad, app.head_h, window=self.canvas, anchor='nw')
             self.canvas.bind('<Button-3>', app.menu)
+            # The transparent browser's parent never contains status text, avoiding
+            # a stale backing surface when reconnecting from the offline page.
+            self.browser_canvas = tk.Canvas(self.canvas, highlightthickness=0, bd=0)
+            self.browser_canvas.bind('<Button-3>', app.menu)
         width, height = app.w() - 2 * app.pad, app.h() - app.head_h - app.pad
         app.base.coords(self.window, app.pad, app.head_h)
         app.base.itemconfigure(self.window, state='normal', width=width, height=height)
@@ -286,8 +353,32 @@ class AnkiTab:
         app, d, c = self.app, self.d, self.canvas
         c.delete('glass')
         app.glass_under(c, app.pad, app.head_h)
+        self.status()
         self.toolbar()
+        if self.browser_canvas is not None:
+            self.browser_canvas.configure(bg=d.BG)
+            self.browser_canvas.delete('glass')
+            app.glass_under(self.browser_canvas, app.pad, app.head_h)
         self.send('moved')
+
+    def status(self):
+        if self.canvas is None:
+            return
+        app, d, c = self.app, self.d, self.canvas
+        c.delete('anki-status')
+        if self.session is not None:
+            return
+        width = app.w() - 2 * app.pad
+        body_height = app.h() - app.head_h - app.pad - app.px(83)
+        title = CONNECTING_TEXT if self.connecting else DISCONNECTED_TEXT
+        if self.renderer_error:
+            title = '卡片渲染器未就绪'
+        c.create_text(width / 2, body_height / 2 - app.px(14), text=title,
+                      fill=d.FG, font=app.f(18, True), tags='anki-status')
+        if self.connection_hint:
+            c.create_text(width / 2, body_height / 2 + app.px(22), text=self.connection_hint,
+                          width=max(1, width-app.px(40)), fill=d.MUTED,
+                          font=app.f(11), tags='anki-status')
 
     def toolbar(self):
         if self.canvas is None:
@@ -298,7 +389,10 @@ class AnkiTab:
         width, height = app.w() - 2 * app.pad, app.h() - app.head_h - app.pad
         phase = self.state.get('side') if self.state and self.state.get('active') else 'done'
         cy = height - app.px(25)
-        if phase == 'question':
+        if self.session is None:
+            if not self.connecting:
+                self.button('retry', width / 2 - app.px(90), cy, app.px(180), RETRY_TEXT, self.enter, True)
+        elif phase == 'question':
             self.button('flip', width / 2 - app.px(90), cy, app.px(180), labels['flip'], self.flip, True)
         elif phase == 'answer':
             answers = self.state['answers']
@@ -329,9 +423,15 @@ class AnkiTab:
         if self.canvas is None:
             return
         app = self.app
-        show = self.active() and app.panel_mode != 'settings' and self.state and self.state.get('active')
-        bounds = (0, 0, max(1, app.w()-2*app.pad),
-                  max(1, app.h()-app.head_h-app.pad-app.px(83)), int(bool(show)))
+        show = (self.active() and app.panel_mode != 'settings' and self.ready
+                and self.session is not None and self.state and self.state.get('active'))
+        width, height = max(1, app.w()-2*app.pad), max(1, app.h()-app.head_h-app.pad-app.px(83))
+        if self.browser_canvas is not None:
+            if show:
+                self.browser_canvas.place(x=0, y=0, width=width, height=height)
+            else:
+                self.browser_canvas.place_forget()
+        bounds = (0, 0, width, height, int(bool(show)))
         if force or bounds != self.bounds:
             self.bounds = bounds
             self.send('bounds ' + ' '.join(map(str, bounds)))
@@ -339,6 +439,7 @@ class AnkiTab:
     def display(self):
         if not self.state or not self.active():
             return
+        self.status()
         self.toolbar()
         self.place()
         effects = self.effects.values(self.state.get('side', 'question'))

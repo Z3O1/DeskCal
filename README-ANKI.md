@@ -5,7 +5,8 @@
 ## 行为
 
 - 原版 Tk/Win32 窗口、壁纸磨砂、Calendar、Timetable、尺寸及原齿轮设置保留。
-- 顶部新增 `Calendar | Anki | Timetable`。点击 Anki 时，仅连接**已经运行、已打开档案且 AnkiConnect 可用**的 Anki；不可用时不切页、不弹提示、不启动 Anki。
+- 顶部新增 `Calendar | Anki | Timetable`。Anki 页始终可以进入；未连接时在页内显示 **“未连接到 Anki”** 和“重新连接”按钮，不启动 Anki、不弹对话框。只有已运行、已打开档案且 AnkiConnect 可用时才显示卡片。
+- 掉线后留在 Anki 页并清除旧卡片，禁用评分。自己打开/重启 Anki 后，点“重新连接”或再点 Anki 页签即可；重连会重新读取本地端口和密钥，不会在后台自动启动复习。
 - Anki 页占满正文，显示原模板 HTML/CSS/JS 和媒体，底部翻面/评分，间隔取自原生排程。背景只在运行时透明，不修改存储的模板。
 - 默认牌组：`英语单词::大学四级英语单词`。不直接打开任何 `collection.anki2`，不复制牌库；评分由 AnkiConnect 调用当前 Anki 的原生排程。
 - 原有 `anki_dark_card/dark.css` 原文只读复用，Zoom（1923741581）当前正/反面缩放配置只读复用。**不保证任意第三方插件都能自动继承**；AnkiConnect 本身不返回通用的 `card_will_show` 最终结果。
@@ -21,13 +22,17 @@
 
 ```json
 {
-  "endpoint": "http://127.0.0.1:8765/api/v1",
+  "endpoint": "http://127.0.0.1:8766/api/v1",
   "api_key": "你的密钥",
   "deck": "英语单词::大学四级英语单词"
 }
 ```
 
+以上以接口已配置为 `8766` 为例。通常不必创建此文件，程序会自动读取 AnkiConnect 的实际端口；手写 `endpoint` 会覆盖自动发现。
+
 可选项 `addons_dir` 指定插件目录，`web_assets` 指定当前 Anki 的 `_aqt/data/web` 目录。密钥/个人配置不得提交或打包。
+
+如果 Anki 已开却仍未连接，请检查端口是否被其他网页服务占用；`HTTPError 404` 不等于 Anki 已关闭。调整 AnkiConnect 端口后需自行重启 Anki，再点“重新连接”。不要擅自关闭占用端口的其他服务。
 
 ## 构建
 
@@ -69,6 +74,6 @@ python tools/test_anki_headless.py --ankiconnect 官方AnkiConnect源码目录
 
 测试进程强制 `QT_QPA_PLATFORM=offscreen`，移除 DISPLAY/Wayland，使用临时档案、随机端口和测试密钥。
 
-已覆盖：原导航方法与控制器的纯逻辑、离线无动作、真实 HTTP 翻面/评分、revlog 只增加一次、过期评分拒绝、dark-card 最终 HTML 逐字对照、JS/媒体、正背 sessionStorage、透明 CSS、缩放与重连防护、fork 更新 URL/旧缓存隔离和默认开机启动代码。`--dark-card` 可对照现有插件；未指定时使用合成 CSS 夹具，不依赖个人文件。
+已覆盖：原导航方法与控制器的纯逻辑、离线页/明确重试/掉线清卡、真实 HTTP 翻面/评分、revlog 只增加一次、过期评分拒绝、dark-card 最终 HTML 逐字对照、JS/媒体、正背 sessionStorage、透明 CSS、缩放与重连防护、fork 更新 URL/旧缓存隔离和默认开机启动代码。`--dark-card` 可对照现有插件；未指定时使用合成 CSS 夹具，不依赖个人文件。
 
 **未由无界面测试证明：** 最终 Windows 原生合成、焦点、字体加载和安装包显示。此前可见桌面测试已停止；原版回归 326/329，3 项字体失败的日志显示 Windows 未能从 WSL UNC 路径加载原版 Noto 字体。字体代码和资源未改，需另行授权的隔离 Windows 环境复验，不能用 headless 结果冒充。

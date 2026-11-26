@@ -3043,8 +3043,8 @@ class DeskCal(tk.Tk):
         c.tag_bind(tag, "<Enter>", enter, add="+")
         c.tag_bind(tag, "<Leave>", lambda _: self.hide_tip(), add="+")
 
-    def set_view(self, key, _anki_ready=False):
-        if key == "anki" and not _anki_ready:
+    def set_view(self, key, _anki_select=False):
+        if key == "anki" and not _anki_select:
             if not self.compact:
                 self.anki.enter()
             return
