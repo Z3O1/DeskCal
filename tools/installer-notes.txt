@@ -1,0 +1,33 @@
+DeskCal with Anki - Windows x64
+
+This installer contains Python, the official Anki core, card resources and the
+transparent WebView2 host. No separate Python, Anki or AnkiConnect installation
+is required. Microsoft WebView2 Runtime must already be installed (normally
+present on Windows 11): https://developer.microsoft.com/microsoft-edge/webview2/
+
+Before installing or uninstalling, exit any existing DeskCal window yourself.
+Setup will not close or restart DeskCal or Anki and will not launch the app when
+installation finishes. Start it from the Start Menu entry "DeskCal - Anki".
+
+Installation is for the current Windows user only and does not require admin
+rights. It uses a separate installer identity and the DeskCal-Anki program folder.
+
+Your calendar, timetable, embedded collection, media and optional encrypted login
+remain in the existing DeskCal data directory. Setup and Uninstall do not delete
+that data directory or an existing data junction. External Anki profiles are not
+opened or changed by the installer.
+
+The app preserves the existing Start with Windows preference. For a new profile,
+autostart is enabled on the first normal app launch, not during installation.
+
+AnkiWeb synchronization is manual and applies to the complete AnkiWeb collection.
+A full upload/download requires your explicit direction and confirmation. Imported
+card templates are executable HTML/JavaScript; use trusted decks.
+
+This is an unsigned community build, not an official Anki release. Compilation
+and package integrity were checked; no application/GUI/login/sync tests were run.
+Card light/dark theme compatibility and desktop add-on parity remain limitations.
+
+Original DeskCal notices are preserved. The embedded integration and combined
+application are AGPL-3.0-or-later. License texts, exact runtime sources and build
+recipes are included in the installed source and licenses folders.

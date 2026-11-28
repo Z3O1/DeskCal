@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 — embedded Anki fork (unreleased)
+## 1.4.0 — embedded Anki fork — 2026-11-28
 
 - Replace external AnkiConnect review with the official embedded Anki 26.9.2 core.
   No installed/running Anki or AnkiConnect is required.
@@ -20,6 +20,11 @@
 - Add a manual GitHub Actions Windows x64 standalone build (Python 3.12/MSVC),
   fixed WebView2/Nuitka dependencies, embedded-backend file checks and ZIP/checksum
   artifacts with source/licenses; no automatic public Release or local deployment.
+- Add an independent per-user Inno Setup installer and a hosted packaging workflow
+  that reuses a verified successful binary build. Keep user data/junctions, require
+  manual app exit, never auto-launch, and carry setup/source/license provenance.
+- Publish Setup/ZIP/checksums only on an explicit release request; do not overwrite
+  existing tags/releases or install builds on the local machine automatically.
 - No runtime/GUI/login/sync tests were run, at the user's request.
 
 ## 1.3.2 — 2026-11-14

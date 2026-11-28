@@ -2,6 +2,14 @@
 
 在原版 [DeskCal 1.3.2](https://github.com/HANSEIDON/DeskCal) 的 Calendar / Timetable 之间加入 Anki 页。当前 fork 使用 **官方 `anki==26.9.2` 内核**，不是自行实现排程算法，也不再连接外部 Anki 或 AnkiConnect。
 
+## 安装版
+
+在 [融合版 Releases](https://github.com/Z3O1/DeskCal/releases) 下载 **DeskCal-1.4.0-Setup.exe**（当前用户安装，无需管理员权限）或独立 ZIP。Setup 使用融合版自己的 AppID 和 `DeskCal-Anki` 目录，不覆盖原版安装注册。
+
+请先自行退出旧 DeskCal。安装器不会自动关闭、启动或重启 DeskCal / Anki；安装后从原 **DeskCal - Anki** 开始菜单入口打开。已有日历/课表、内置牌库、媒体、登录文件和 `data` junction 保留，卸载也不删除个人数据。
+
+安装版与独立 ZIP 不需要 Python、Anki 或 AnkiConnect，但仍需系统 **WebView2 Runtime**。程序首次正常启动按原有策略默认启用开机启动，已有偏好保留；安装过程不提前更改这一偏好。
+
 ## 使用
 
 1. 打开原齿轮 **设置 → Anki · 账户与牌组**；首次使用会创建 DeskCal 自己的空牌库，不需要先进入 Anki 页。
@@ -82,6 +90,18 @@ gh workflow run build-windows.yml --repo Z3O1/DeskCal --ref main
 云端使用 Windows 2022 / Python 3.12 / MSVC，下载固定版本 WebView2 SDK，编译宿主并用固定版本 Nuitka 打包。成功后从该次运行的 **Artifacts → DeskCal-Windows-x64-…** 下载 ZIP 和 SHA-256；解压得到 `DeskCal/DeskCal.exe`，无需另外安装 Python 或 Anki，仍需系统 WebView2 Runtime。
 
 产物同时携带内核扩展、资源、许可证、对应源码和构建信息。仅编译与文件检查，不启动 exe、不运行任何测试、登录或真实同步，也不会自动发布 Release 或覆盖本机版本。
+
+## Setup 构建与发布
+
+已有成功的 Windows ZIP 时，可在 **Actions → Build Setup (existing Windows artifact)** 输入对应运行 ID，或：
+
+```text
+gh workflow run build-setup.yml --repo Z3O1/DeskCal --ref main -f source_run_id=46142279263
+```
+
+Setup workflow 只有读取权限，不自动发布：它核对原 ZIP 的 SHA-256、构建来源及当前运行时代码，复用原二进制，在独立 Windows runner 上用预装 Inno Setup 编译安装器。若运行时代码已变更，必须先重新执行 Windows 编译。Setup 和重新打包的 ZIP 都携带最新安装源码、许可证和独立来源信息。
+
+安装器文件名为 `DeskCal-<版本>-Setup.exe`，旁边有 `.sha256`，与融合版更新器匹配。确认构建成功及产物后，只有在用户明确要求发布时才创建新的 `v<版本>` Release，不覆盖已存在的 tag/Release。
 
 ## 本地构建说明
 

@@ -1,4 +1,4 @@
-> **内置 Anki fork 1.4.0（未发布）：** 随包携带官方 Anki 内核和独立牌库；在原齿轮设置中登录 AnkiWeb、同步、选择牌组及导入导出，不需要外部 Anki / AnkiConnect。使用与构建见 [README-ANKI.md](README-ANKI.md)，组合发行许可见 [LICENSING.md](LICENSING.md)。下文为原版介绍，原版 Releases 不包含此功能。
+> **内置 Anki 融合版 1.4.0：** [下载融合版 Setup / ZIP](https://github.com/Z3O1/DeskCal/releases)。随包携带官方 Anki 内核和独立牌库；在原齿轮设置中登录 AnkiWeb、同步、选择牌组及导入导出，不需要外部 Anki / AnkiConnect。使用与构建见 [README-ANKI.md](README-ANKI.md)，组合发行许可见 [LICENSING.md](LICENSING.md)。下文为原版介绍，原版 Releases 不包含此功能。
 
 <div align="center">
 

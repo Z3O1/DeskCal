@@ -13,6 +13,7 @@ and combined distribution are AGPL-3.0-or-later (`COPYING`, `LICENSING.md`).
 | [Python](https://www.python.org/) runtime/stdlib | Standalone application runtime | Python Software Foundation License |
 | [Tcl/Tk](https://www.tcl-lang.org/) | Original window/drawing toolkit | Tcl/Tk BSD-style license |
 | [Nuitka](https://nuitka.net/) | Standalone compilation | Apache-2.0 |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) | Per-user Windows installer | Inno Setup License; notice in `licenses/InnoSetup-LICENSE.txt` |
 
 Anki's vendored source exceptions include MathJax (Apache-2.0), jQuery/jQuery-UI
 (MIT), plot.js (MIT), protobuf.js (BSD-3-Clause), translations and other items;
@@ -30,6 +31,10 @@ WebView2 Runtime is a Microsoft runtime component required on the target Windows
 machine; it is not included in the source preview. Fonts are loaded privately,
 not installed system-wide. The source preview requires Windows x64 Python 3.14
 with Tk; the standalone build also includes Python.
+
+The hosted setup build preserves the exact Inno Setup compiler's license with the
+installer payload. Inno Setup and its copyright/website notices are unmodified;
+its compiler is used only for packaging, not executed as part of normal DeskCal use.
 
 No external local Anki profile, AnkiConnect add-on, personal dark-card CSS or Zoom
 config is redistributed or read by the embedded integration. Manual synchronization

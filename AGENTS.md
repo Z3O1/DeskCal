@@ -74,6 +74,15 @@ acceptance are not verified by static checks or old test results.
   explicitly authorized GitHub Actions builds may run them on hosted runners.
 - `.github/workflows/build-windows.yml`: manual Windows x64/Python 3.12 build;
   compile/package only, upload ZIP/checksum/log artifacts, never auto-publish Release.
+- `.github/workflows/build-setup.yml` and `tools/build_setup.py`: reuse a successful
+  standalone artifact only if runtime sources/version/provenance still match;
+  compile Inno Setup on the hosted runner, never execute Setup.exe or DeskCal.exe.
+- `tools/DeskCal.iss`: distinct per-user AppID and DeskCal-Anki directory; no auto
+  close/start/restart, no recursive personal-data deletion. AppMutex requires the
+  user to exit existing DeskCal manually. Existing data/junctions must survive.
+- Publishing a public Release requires an explicit user request (e.g. "release
+  setup"). Verify assets first, never overwrite an existing Release/tag, and attach
+  Setup/ZIP checksums plus licensing/source. Do not install it locally as part of publishing.
 - `anki_vendor/`, `anki_webview/assets/`, `build/`, `dist/` are generated/ignored.
 - Keep upstream MIT notice; embedded integration/combined distribution is AGPL-3+
   with `COPYING`, `LICENSING.md`, dependency notices and corresponding sources.

@@ -17,12 +17,14 @@ SOURCE = (
     'deskcal.py', 'anki_core.py', 'anki_sync.py', 'anki_credentials.py', 'anki_settings.py',
     'anki_render.py', 'anki_tab.py', 'DeskCal.bat', 'requirements-anki.txt',
     'README.md', 'README-ANKI.md', 'AGENTS.md', 'LICENSE', 'COPYING', 'LICENSING.md',
-    'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'licenses/Anki-LICENSE.txt',
+    'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'licenses/Anki-LICENSE.txt', 'licenses/InnoSetup-LICENSE.txt',
     'docs/icon.png', 'fonts/OFL-LICENSE.txt', 'fonts/NotoSansCJKsc-Regular.otf', 'fonts/NotoSansCJKsc-Bold.otf',
     'anki_webview/card.html', 'anki_webview/CardHost.cs',
     'tools/build.py', 'tools/build_anki_host.py', 'tools/package_anki_preview.py',
     'tools/prepare_anki_assets.py', 'tools/prepare_anki_vendor.py',
-    'tools/make_icon.py', 'tools/requirements-build.txt', '.github/workflows/build-windows.yml',
+    'tools/make_icon.py', 'tools/requirements-build.txt',
+    'tools/build_setup.py', 'tools/DeskCal.iss', 'tools/installer-notes.txt',
+    '.github/workflows/build-windows.yml', '.github/workflows/build-setup.yml', '.github/release-notes.md',
 )
 HOST = ('CardHost.exe', 'Microsoft.Web.WebView2.Core.dll', 'WebView2Loader.dll', 'WEBVIEW2-LICENSE.txt')
 PREFIX = 'DeskCal-Anki-embedded/'
