@@ -1,19 +1,22 @@
-"""Anki view controller for the original DeskCal window (standard-library only)."""
+"""Embedded Anki page inside the original DeskCal Tk/Win32 shell."""
 import base64
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import queue
 import subprocess
 import threading
 import tkinter as tk
+from tkinter import filedialog
 
-from anki_api import AnkiClient, BIDI, display_card
-from anki_effects import InstalledCardEffects
+from anki_core import AnkiCore, CoreError
+from anki_render import BIDI, display_card
+from anki_settings import AnkiSettings
 
-DISCONNECTED_TEXT = '未连接到 Anki'
-CONNECTING_TEXT = '正在连接 Anki…'
-RETRY_TEXT = '重新连接'
+DISCONNECTED_TEXT = '内置 Anki 暂不可用'
+CONNECTING_TEXT = '正在打开内置 Anki…'
+RETRY_TEXT = '重试'
 
 LABELS = {
     'en': dict(again='Again', hard='Hard', good='Good', easy='Easy', flip='Show Answer', done='No cards due', loading='Loading card…'),
@@ -22,25 +25,18 @@ LABELS = {
 }
 
 
-def find_web_assets(configured=None):
-    if configured:
-        path = Path(configured)
-        if (path / 'js/reviewer.js').is_file():
-            return path
-    local = Path(os.environ.get('LOCALAPPDATA', ''))
-    for root in (local / 'Programs/Anki', Path(os.environ.get('PROGRAMFILES', '')) / 'Anki'):
-        path = root / 'app_packages/_aqt/data/web'
-        if (path / 'js/reviewer.js').is_file():
-            return path
-    return None
+def find_web_assets(root):
+    # Assets belong to DeskCal, never to a separately installed Anki.
+    path = Path(root) / 'anki_webview/assets'
+    return path if (path / 'js/reviewer.js').is_file() else None
 
 
 class AnkiTab:
     def __init__(self, app, style):
         self.app, self.d = app, style
-        self.config_path = Path(style.APP_DIR) / 'anki-connect.json'
-        self.client = AnkiClient.from_file(self.config_path)
-        self.effects = InstalledCardEffects(self.client.settings.get('addons_dir'))
+        self.client = AnkiCore(style.APP_DIR, app.lang)
+        # Collection and Rust backend are confined to this one thread, including close.
+        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='deskcal-anki')
         self.session = self.media = self.state = None
         self.previous = 'cal'
         self.generation = self.seq = 0
@@ -50,18 +46,16 @@ class AnkiTab:
         self.renderer_error = False
         self.canvas = self.browser_canvas = self.window = self.host = None
         self.inbox = queue.Queue()
+        self.syncing = False
+        self.sync_status_text = self.library_error = ''
+        self.settings_ui = None
+        self.client.sync.report = lambda text: self.inbox.put(('sync-progress', text))
         self.tick_job = self.refresh_job = None
         self.signature = self.bounds = None
         self.root = Path(style.HERE)
         self.exe = next((p for p in (self.root / 'build/anki-host/CardHost.exe',
                                     self.root / 'anki_webview/CardHost.exe') if p.is_file()), None)
-        self.assets = find_web_assets(self.client.settings.get('web_assets'))
-
-    def reload_client(self):
-        # Retry also picks up a changed local AnkiConnect port/key after its restart.
-        self.client = AnkiClient.from_file(self.config_path)
-        self.effects = InstalledCardEffects(self.client.settings.get('addons_dir'))
-        self.assets = find_web_assets(self.client.settings.get('web_assets'))
+        self.assets = find_web_assets(self.root)
 
     def active(self):
         return self.app.view == 'anki' and not self.app.compact
@@ -78,40 +72,38 @@ class AnkiTab:
         self.connecting = False
         self.renderer_error = False
         self.connection_hint = ''
-        # Selecting the tab never depends on a live Anki connection.
+        # Opening the page never launches or connects to an external Anki.
         if not was_active:
             self.app.set_view('anki', _anki_select=True)
         if self.busy:
             self.paint()
             return
-        try:
-            self.reload_client()
-        except Exception as error:
-            self.d.log('Anki tab configuration failed: ' + self.error_code(error))
-            self.disconnected(error)
-            return
+        self.assets = find_web_assets(self.root)
         if not self.exe or not self.assets:
             self.renderer_error = True
-            self.connection_hint = '缺少 WebView2 宿主或 Anki 网页资源'
-            self.d.log('Anki tab: build the WebView2 host and install Anki web resources first')
+            self.connection_hint = '缺少内置卡片组件，请重新安装；源码版请先准备宿主和卡片资源'
+            self.d.log('Anki tab: bundled WebView2 host or reviewer assets missing')
             self.paint()
             return
         self.connecting = True
         self.paint()
         self.run(self.client.enter, self.entered, entering=True)
 
-    def run(self, function, callback, entering=False):
+    def run(self, function, callback, entering=False, quiet=False, persistent=False, on_error=None):
         if self.busy or self.closed:
             return
         self.busy = True
-        generation = self.generation
+        generation = None if persistent else self.generation
         def work():
             try:
                 value, error = function(), None
             except Exception as exc:
                 value, error = None, exc
-            self.inbox.put(('api', generation, callback, value, error, entering))
-        threading.Thread(target=work, daemon=True).start()
+            self.inbox.put(('api', generation, callback, value, error, entering, on_error))
+        self.worker.submit(work)
+        if not quiet:
+            self.toolbar()
+        self.refresh_settings()
         self.ensure_tick()
 
     def entered(self, result):
@@ -127,6 +119,10 @@ class AnkiTab:
         if self.host and self.host.poll() is None:
             self.send_media()
         self.app.render()
+        if self.app.panel_mode == 'settings':
+            self.refresh_settings()
+            self.schedule_refresh()
+            return
         if not self.host or self.host.poll() is not None:
             self.host = None
             self.ready = False
@@ -192,19 +188,28 @@ class AnkiTab:
             while True:
                 item = self.inbox.get_nowait()
                 if item[0] == 'api':
-                    _, generation, callback, value, error, entering = item
+                    _, generation, callback, value, error, entering, on_error = item
                     self.busy = False
-                    if generation != self.generation:
+                    if generation is not None and generation != self.generation:
                         continue
                     if error:
                         self.d.log('Anki tab request failed: ' + self.error_code(error))
-                        self.disconnected(error)
+                        if on_error:
+                            on_error(error)
+                        else:
+                            self.disconnected(error)
                     else:
                         callback(value)
-                elif item[1] is self.host:
+                elif item[0] == 'sync-progress':
+                    if self.syncing:
+                        self.sync_status_text = item[1]
+                        if self.active() and self.app.panel_mode != 'settings':
+                            self.toolbar()
+                elif item[0] == 'host' and item[1] is self.host:
                     self.host_event(item[2])
         except queue.Empty:
             pass
+        self.refresh_settings()
         if self.active():
             self.place()
         if self.host or self.busy:
@@ -224,7 +229,7 @@ class AnkiTab:
                 return
             action = message.get('action')
             if action == 'flip':
-                self.flip()
+                self.flip(message.get('answer', ''))
             elif action == 'rate':
                 self.rate(message.get('index'))
             elif action == 'audio':
@@ -251,13 +256,19 @@ class AnkiTab:
         self.refresh_job = None
         if self.closed or not self.active() or self.session is None:
             return
-        if not self.busy:
-            self.run(lambda: self.client.current(self.session), self.updated)
+        if not self.busy and self.app.panel_mode != 'settings':
+            session = self.session
+            self.run(lambda: self.client.current(session), self.updated, quiet=True)
         self.schedule_refresh()
 
     def updated(self, state):
         self.state = state
-        self.display()
+        self.library_error = ''
+        if not self.syncing:
+            self.sync_status_text = ''
+        self.refresh_settings()
+        if self.app.panel_mode != 'settings':
+            self.display()
 
     @staticmethod
     def error_code(error):
@@ -272,9 +283,12 @@ class AnkiTab:
         self.session = self.media = self.state = None
         self.signature = None
         self.seq += 1  # Ignore messages from a no-longer-visible card.
+        self.send('card ' + json.dumps({'phase': 'done', 'seq': self.seq}))
         self.connection_hint = ('卡片渲染器未就绪，请检查安装组件' if renderer else
-                                '请确认 Anki 已打开且 AnkiConnect 已启用')
-        if error is not None:
+                                '请重试；内置牌库与原 Anki 完全独立')
+        if isinstance(error, CoreError):
+            self.connection_hint = str(error)
+        elif error is not None:
             self.connection_hint += '（' + self.error_code(error) + '）'
         if self.refresh_job:
             self.app.after_cancel(self.refresh_job)
@@ -284,31 +298,152 @@ class AnkiTab:
 
     def can_act(self):
         return (self.active() and self.app.panel_mode != 'settings' and self.ready and not self.busy
-                and self.session is not None and self.state and self.state.get('active'))
+                and not self.syncing and self.session is not None and self.state and self.state.get('active')
+                and not self.state.get('sync', {}).get('pending'))
 
-    def flip(self):
+    def flip(self, typed_answer=None):
         if self.can_act() and self.state['side'] == 'question':
-            token = self.state['stateToken']
-            self.run(lambda: self.client.flip(self.session, token), self.updated)
+            if typed_answer is None:
+                # Ask the browser for the current input before flipping, including
+                # clicks on the native toolbar (not only browser keyboard events).
+                self.send('activate')
+                return
+            token, session = self.state['stateToken'], self.session
+            self.run(lambda: self.client.flip(session, token, typed_answer), self.updated)
 
     def rate(self, index):
         if self.can_act() and self.state['side'] == 'answer' and type(index) is int:
             answers = self.state['answers']
             if 0 <= index < len(answers):
-                token, rating = self.state['stateToken'], answers[index]['rating']
-                self.run(lambda: self.client.answer(self.session, token, rating), self.updated)
+                token, rating, session = self.state['stateToken'], answers[index]['rating'], self.session
+                self.run(lambda: self.client.answer(session, token, rating), self.updated)
 
     def audio(self):
         if self.can_act():
-            token = self.state['stateToken']
-            self.run(lambda: self.client.audio(self.session, token), self.updated)
+            self.send('card ' + json.dumps({'command': 'audio', 'seq': self.seq}))
 
     def undo(self):
+        if self.state and self.state.get('sync', {}).get('pending'):
+            return
         if self.active() and self.session is not None and not self.busy and self.app.panel_mode != 'settings':
-            def work():
-                self.client.call('collection.undo', session=self.session)
-                return self.client.current(self.session)
-            self.run(work, self.updated)
+            session = self.session
+            self.run(lambda: self.client.undo(session), self.updated)
+
+    def render_settings(self, parent):
+        self.settings_ui = AnkiSettings(self, parent)
+        if self.session is None and not self.busy:
+            self.load_library()
+
+    def refresh_settings(self):
+        if self.settings_ui is not None and self.settings_ui.alive():
+            self.settings_ui.render()
+
+    def load_library(self):
+        if self.busy or self.closed:
+            return
+        self.library_error = ''
+        self.run(self.client.enter, self.library_loaded, persistent=True, on_error=self.library_failed)
+
+    def library_loaded(self, result):
+        self.session, self.media, self.state = result['session'], result['media'], result['review']
+        self.library_error = ''
+        self.signature = None
+        if self.host and self.host.poll() is None:
+            self.send_media()
+        self.refresh_settings()
+        if self.active() and self.app.panel_mode != 'settings':
+            self.entered(result)
+
+    def library_failed(self, error):
+        self.library_error = str(error) if isinstance(error, CoreError) else '无法读取内置牌库（%s）' % self.error_code(error)
+        self.session = self.state = None
+        self.sync_status_text = self.library_error
+        self.seq += 1
+        self.send('card ' + json.dumps({'phase': 'done', 'seq': self.seq}))
+        self.place()
+        self.refresh_settings()
+
+    def settings_failed(self, error):
+        self.sync_status_text = str(error) if isinstance(error, CoreError) else '操作未完成（%s），请重试' % self.error_code(error)
+        self.load_library()
+
+    def sync_action(self, function):
+        if self.busy or self.session is None or self.closed:
+            return
+        self.syncing = True
+        self.sync_status_text = '正在处理同步请求…'
+        self.client.sync.prepare()
+        self.seq += 1
+        self.send('card ' + json.dumps({'phase': 'done', 'seq': self.seq}))
+        self.run(function, self.sync_finished, persistent=True, on_error=self.sync_failed)
+
+    def sync_finished(self, result):
+        self.syncing = False
+        library = result.get('library')
+        self.sync_status_text = result.get('error') or (library['review'].get('notice', '') if library else '请重新读取内置牌库')
+        if library:
+            self.library_loaded(library)
+        else:
+            self.library_failed(CoreError(self.sync_status_text))
+        self.refresh_settings()
+
+    def sync_failed(self, error):
+        self.syncing = False
+        self.settings_failed(error)
+
+    def sign_in(self, username, password, remember, changed=False):
+        session = self.session
+        self.sync_action(lambda: self.client.sync.sign_in(session, username, password, remember, changed))
+
+    def sign_out(self):
+        session = self.session
+        self.sync_action(lambda: self.client.sync.sign_out(session))
+
+    def start_sync(self):
+        session = self.session
+        self.sync_action(lambda: self.client.sync.start(session))
+
+    def continue_full_sync(self, token, direction):
+        session = self.session
+        self.sync_action(lambda: self.client.sync.continue_full(session, token, direction))
+
+    def cancel_pending_sync(self):
+        session = self.session
+        self.sync_action(lambda: self.client.sync.cancel_pending(session))
+
+    def cancel_sync(self):
+        if self.syncing:
+            self.client.sync.request_cancel()
+            self.sync_status_text = '正在取消同步…'
+            self.refresh_settings()
+
+    def select_deck(self, deck_id):
+        if self.busy or self.session is None:
+            return
+        session = self.session
+        self.run(lambda: self.client.select_deck(session, deck_id), self.updated,
+                 persistent=True, on_error=self.settings_failed)
+
+    def import_package(self):
+        if self.busy or self.session is None:
+            return
+        filename = filedialog.askopenfilename(parent=self.app, title='导入到 DeskCal 独立牌库',
+                                               filetypes=[('Anki 牌组包', '*.apkg')])
+        if filename:
+            session = self.session
+            self.run(lambda: self.client.import_package(session, filename), self.updated,
+                     persistent=True, on_error=self.settings_failed)
+
+    def export_package(self):
+        if self.busy or self.session is None:
+            return
+        filename = filedialog.asksaveasfilename(parent=self.app, title='导出全部牌组及学习进度',
+                                                defaultextension='.apkg', initialfile='DeskCal-decks.apkg',
+                                                filetypes=[('Anki 牌组包', '*.apkg')])
+        if filename:
+            session = self.session
+            self.run(lambda: self.client.export_package(session, filename), self.updated,
+                     persistent=True, on_error=self.settings_failed)
 
     def leave(self):
         self.generation += 1
@@ -316,6 +451,7 @@ class AnkiTab:
             self.app.set_view(self.previous if self.previous in ('cal', 'tt') else 'cal')
 
     def hide(self):
+        self.send('card ' + json.dumps({'command': 'stop'}))
         if self.window is not None:
             self.app.base.itemconfigure(self.window, state='hidden')
         self.place()
@@ -346,6 +482,12 @@ class AnkiTab:
         self.paint()
         self.place(force=True)
         self.display()
+        if self.session is not None and (not self.host or self.host.poll() is not None):
+            if self.exe and self.assets:
+                self.ready = False
+                self.start_host()
+            else:
+                self.disconnected(CoreError('缺少内置卡片组件，请检查安装文件'), renderer=True)
 
     def paint(self):
         if self.canvas is None or not self.active():
@@ -366,17 +508,26 @@ class AnkiTab:
             return
         app, d, c = self.app, self.d, self.canvas
         c.delete('anki-status')
-        if self.session is not None:
+        if self.session is not None and self.state and self.state.get('active'):
             return
         width = app.w() - 2 * app.pad
         body_height = app.h() - app.head_h - app.pad - app.px(83)
         title = CONNECTING_TEXT if self.connecting else DISCONNECTED_TEXT
         if self.renderer_error:
             title = '卡片渲染器未就绪'
+        hint = self.connection_hint
+        if self.session is not None:
+            empty = not self.state.get('totalCards')
+            title = '欢迎使用内置 Anki' if empty else '当前牌组没有待学卡片'
+            hint = '在齿轮设置中登录 AnkiWeb 同步，或导入 .apkg 牌组' if empty else '在齿轮设置中切换牌组，或稍后继续学习'
+            if self.state.get('sync', {}).get('pending'):
+                title, hint = '请确认同步方向', '在齿轮设置中确认或取消全量同步'
+            if self.state.get('blockedReason'):
+                title, hint = '当前牌库无法复习', self.state['blockedReason']
         c.create_text(width / 2, body_height / 2 - app.px(14), text=title,
                       fill=d.FG, font=app.f(18, True), tags='anki-status')
-        if self.connection_hint:
-            c.create_text(width / 2, body_height / 2 + app.px(22), text=self.connection_hint,
+        if hint:
+            c.create_text(width / 2, body_height / 2 + app.px(22), text=hint,
                           width=max(1, width-app.px(40)), fill=d.MUTED,
                           font=app.f(11), tags='anki-status')
 
@@ -389,6 +540,12 @@ class AnkiTab:
         width, height = app.w() - 2 * app.pad, app.h() - app.head_h - app.pad
         phase = self.state.get('side') if self.state and self.state.get('active') else 'done'
         cy = height - app.px(25)
+        if self.session is not None and self.state:
+            counts = self.state.get('counts', {})
+            notice = self.state.get('notice') or ('新卡 %d · 学习 %d · 复习 %d' %
+                       (counts.get('new', 0), counts.get('learning', 0), counts.get('review', 0)))
+            c.create_text(width/2, height-app.px(65), text=(self.sync_status_text or '正在同步…') if self.syncing else ('正在处理…' if self.busy else notice),
+                          fill=d.MUTED, font=app.f(10), width=max(1, width-app.px(12)), tags='anki-controls')
         if self.session is None:
             if not self.connecting:
                 self.button('retry', width / 2 - app.px(90), cy, app.px(180), RETRY_TEXT, self.enter, True)
@@ -415,7 +572,7 @@ class AnkiTab:
         d.round_rect(c, x, y-app.px(17), x+width, y+app.px(17), app.px(9),
                      fill=fill, outline='', tags=('anki-controls', tag))
         c.create_text(x+width/2, y, text=text, fill=d.FG, font=app.f(12, active), tags=('anki-controls', tag))
-        c.tag_bind(tag, '<Button-1>', lambda _: callback())
+        c.tag_bind(tag, '<Button-1>', lambda _: callback() if not self.busy else None)
         c.tag_bind(tag, '<Enter>', lambda _: c.configure(cursor='hand2'))
         c.tag_bind(tag, '<Leave>', lambda _: c.configure(cursor=''))
 
@@ -437,21 +594,24 @@ class AnkiTab:
             self.send('bounds ' + ' '.join(map(str, bounds)))
 
     def display(self):
-        if not self.state or not self.active():
+        if not self.state or not self.active() or self.app.panel_mode == 'settings':
             return
         self.status()
         self.toolbar()
         self.place()
-        effects = self.effects.values(self.state.get('side', 'question'))
-        signature = json.dumps([self.state.get('card'), self.state.get('side'), self.state.get('rendered'), self.app.theme, effects], sort_keys=True)
+        signature = json.dumps([self.state.get('card'), self.state.get('side'), self.state.get('rendered'), self.app.theme], sort_keys=True)
         if signature != self.signature or not self.ready:
             self.signature = signature
             self.seq += 1
-            card = display_card(self.state, self.seq, self.app.theme, effects)
+            card = display_card(self.state, self.seq, self.app.theme)
             self.send('card ' + json.dumps(card, ensure_ascii=True))
 
     def close(self):
+        if self.closed:
+            return
         self.closed = True
+        if self.syncing:
+            self.client.sync.request_cancel()
         self.generation += 1
         for job in (self.tick_job, self.refresh_job):
             if job:
@@ -464,3 +624,10 @@ class AnkiTab:
                 self.host.stdin.close()
             except (OSError, ValueError):
                 pass
+        def close_core():
+            try:
+                self.client.close()
+            except Exception as error:
+                self.d.log('Embedded Anki close failed: ' + self.error_code(error))
+        self.worker.submit(close_core)
+        self.worker.shutdown(wait=False)

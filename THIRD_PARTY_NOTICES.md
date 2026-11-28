@@ -1,33 +1,38 @@
 # Third-party notices
 
-The original DeskCal calendar/timetable code uses only the Python standard library.
-This fork adds an optional Anki tab using a transparent .NET/WebView2 child host.
-The Windows release bundles the following third-party components so it can run
-without a Python installation.
+The original DeskCal calendar/timetable uses Python/Tk/Win32 and remains MIT
+licensed (`LICENSE`). This fork embeds the official Anki core; the integration
+and combined distribution are AGPL-3.0-or-later (`COPYING`, `LICENSING.md`).
 
 | Component | Used for | License |
 | --- | --- | --- |
-| [Noto Sans CJK SC](https://github.com/notofonts/noto-cjk) | UI font (Chinese, Korean, Latin) | SIL Open Font License 1.1 |
-| [Python](https://www.python.org/) 3.12 runtime and standard library | Runs the app | [Python Software Foundation License](https://docs.python.org/3/license.html) |
-| [Tcl/Tk](https://www.tcl-lang.org/) 8.6 | Window and drawing toolkit (tkinter) | [Tcl/Tk license](https://www.tcl-lang.org/software/tcltk/license.html) (BSD-style) |
-| [Nuitka](https://nuitka.net/) | Compiles `deskcal.py` to the bundled app (`DeskCal.exe`) | [Apache License 2.0](https://github.com/Nuitka/Nuitka/blob/main/LICENSE.txt) |
+| [Anki 26.09.2](https://github.com/ankitects/anki/tree/26.09.2) / PyPI `anki==26.9.2` | Official Rust/Python collection, scheduling, templates and import/export | AGPL-3.0-or-later, with upstream component exceptions in `licenses/Anki-LICENSE.txt` |
+| Matching `aqt==26.9.2` reviewer assets | HTML/CSS/JavaScript/MathJax; **no Qt GUI is installed or started by this fork** | Anki AGPL plus upstream vendored-component notices |
+| [Microsoft WebView2 SDK 1.0.3856.49](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3856.49) | Transparent native card renderer | Original Microsoft terms in `anki_webview/WEBVIEW2-LICENSE.txt` in packages |
+| [Noto Sans CJK SC](https://github.com/notofonts/noto-cjk) | UI fonts | SIL Open Font License 1.1 (`fonts/OFL-LICENSE.txt`) |
+| [Python](https://www.python.org/) runtime/stdlib | Standalone application runtime | Python Software Foundation License |
+| [Tcl/Tk](https://www.tcl-lang.org/) | Original window/drawing toolkit | Tcl/Tk BSD-style license |
+| [Nuitka](https://nuitka.net/) | Standalone compilation | Apache-2.0 |
 
-The full license texts are in the `licenses` folder of the release. In this
-repository, the font license is `fonts/OFL-LICENSE.txt`.
+Anki's vendored source exceptions include MathJax (Apache-2.0), jQuery/jQuery-UI
+(MIT), plot.js (MIT), protobuf.js (BSD-3-Clause), translations and other items;
+consult the exact upstream `LICENSE` and sources carried with the package.
+The Rust backend also links its upstream crate dependencies, whose declarations
+and lockfile are retained in the corresponding upstream source archive.
 
-The font is loaded privately by DeskCal while it runs. It is not installed on
-your system.
+The core's Python dependencies include decorator, Markdown, orjson, protobuf,
+requests/PySocks, typing_extensions and their transitive dependencies. Source
+previews preserve their `.dist-info` license/copyright files. Standalone builds
+copy dependency license files into `licenses/python-packages/`. Individual
+component licenses are not replaced by the combined application's AGPL license.
 
-## Anki tab in this fork
+WebView2 Runtime is a Microsoft runtime component required on the target Windows
+machine; it is not included in the source preview. Fonts are loaded privately,
+not installed system-wide. The source preview requires Windows x64 Python 3.14
+with Tk; the standalone build also includes Python.
 
-- Microsoft WebView2 SDK 1.0.3856.49: the .NET Core DLL and x64 loader are distributed
-  with `anki_webview/WEBVIEW2-LICENSE.txt`, the SDK's original Microsoft license.
-  WebView2 Runtime is a separately installed Microsoft component.
-- Anki is a separately installed application; its reviewer CSS/JavaScript/media are
-  loaded from that local installation, not redistributed in this fork's package.
-  See [Anki's license](https://github.com/ankitects/anki/blob/main/LICENSE) for its
-  AGPL-3.0-or-later and included-component notices.
-- AnkiConnect is a separately installed standard HTTP API add-on, not a bundled
-  DeskCal-specific add-on. See [its upstream source](https://github.com/FooSoft/anki-connect).
-- Existing dark-card CSS and Zoom configuration are read only at runtime from the
-  user's installed add-ons. Personal settings and API keys are never bundled.
+No external local Anki profile, AnkiConnect add-on, personal dark-card CSS or Zoom
+config is redistributed or read by the embedded integration. Manual synchronization
+uses the official AnkiWeb service via Anki's native backend. Windows DPAPI is an OS
+API, not an additional bundled library; passwords are never persisted, and optional
+user-encrypted session tokens remain in the personal data directory, never packages.

@@ -9,7 +9,9 @@ Steps:
   4. Bundle fonts + icon, copy docs, zip it and print the SHA-256
 """
 import argparse
+import glob
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -56,12 +58,8 @@ def main():
     if not os.path.exists(VPY):
         run(sys.executable, "-m", "venv", VENV)
     run(VPY, "-m", "pip", "install", "--disable-pip-version-check", "-q",
-        "nuitka", "ordered-set", "zstandard")
-    # Install build requirements if present (e.g. Pillow for icon generation)
-    reqs = os.path.join(ROOT, "tools", "requirements-build.txt")
-    if os.path.exists(reqs):
-        run(VPY, "-m", "pip", "install", "--disable-pip-version-check", "-q",
-            "-r", reqs)
+        "-r", os.path.join(ROOT, "tools", "requirements-build.txt"),
+        "-r", os.path.join(ROOT, "requirements-anki.txt"))
 
     # --- Step 2: Icon ---
     if os.path.exists(BUILD):
@@ -75,6 +73,7 @@ def main():
             file.write(content)
     icon = os.path.join(BUILD, "deskcal.ico")
     run(VPY, os.path.join(ROOT, "tools", "make_icon.py"), icon)
+    run(VPY, os.path.join(ROOT, "tools", "prepare_anki_assets.py"))
 
     # --- Step 3: Nuitka build ---
     print("\n[2/4] Compiling with Nuitka (Python → C → machine code) ...")
@@ -82,14 +81,21 @@ def main():
     nuitka_cmd = [
         VPY, "-m", "nuitka",
         "--standalone",
+        "--msvc=latest",
+        "--jobs=2",
+        "--report=" + os.path.join(BUILD, "nuitka-report.xml"),
         "--output-filename=DeskCal.exe",
         "--windows-console-mode=disable",
         "--enable-plugin=tk-inter",                 # tkinter 가 런타임에 동작하려면 필수
+        "--include-package=anki",
+        "--include-package-data=anki",
+        "--include-distribution-metadata=anki",
         "--windows-icon-from-ico=" + icon,          # 작업표시줄·exe 아이콘
         # Fonts + icon
         "--include-data-dir=" + os.path.join(ROOT, "fonts") + "=fonts",
         "--include-data-file=" + os.path.join(ROOT, "docs", "icon.png") + "=icon.png",
         "--include-data-file=" + os.path.join(ROOT, "anki_webview", "card.html") + "=anki_webview/card.html",
+        "--include-data-dir=" + os.path.join(ROOT, "anki_webview", "assets") + "=anki_webview/assets",
         # Output
         "--output-dir=" + out,
         "--remove-output",
@@ -114,7 +120,7 @@ def main():
 
     # --- Step 4: Package ---
     print("\n[3/4] Copying docs + licenses ...")
-    for name in ("README.md", "README-ANKI.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
+    for name in ("README.md", "README-ANKI.md", "CHANGELOG.md", "LICENSE", "COPYING", "LICENSING.md", "THIRD_PARTY_NOTICES.md"):
         src = os.path.join(ROOT, name)
         if os.path.exists(src):
             shutil.copy(src, app)
@@ -126,6 +132,23 @@ def main():
     # License texts
     lic = os.path.join(app, "licenses")
     os.makedirs(lic, exist_ok=True)
+    shutil.copytree(os.path.join(ROOT, 'licenses'), lic, dirs_exist_ok=True)
+    # Include the exact fork sources/build recipes and upstream source, never data/.
+    from package_anki_preview import SOURCE
+    source = os.path.join(app, 'source', 'deskcal')
+    for name in SOURCE:
+        dest = os.path.join(source, name)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(os.path.join(ROOT, name), dest)
+    shutil.copytree(os.path.join(BUILD, 'anki-upstream'), os.path.join(app, 'source', 'anki-upstream'))
+    # Preserve dependency copyright/license files, including native wheel notices.
+    run(VPY, '-c',
+        'import importlib.metadata as m, pathlib, shutil; root=pathlib.Path(' + repr(lic) + ')/"python-packages"; '
+        '[(lambda src,dst: (dst.parent.mkdir(parents=True,exist_ok=True),shutil.copy2(src,dst)))'
+        '(d.locate_file(f),root/d.metadata["Name"]/str(f)) '
+        'for d in m.distributions() for f in (d.files or []) '
+        'if ("license" in str(f).lower() or "copying" in str(f).lower()) '
+        'and ".." not in f.parts and d.locate_file(f).is_file()]')
     base = subprocess.run([VPY, "-c", "import sys; print(sys.base_prefix)"], check=True,
                           capture_output=True, text=True).stdout.strip()
     for src, name in ((os.path.join(base, "LICENSE.txt"), "Python-LICENSE.txt"),
@@ -138,6 +161,22 @@ def main():
         f.write("DeskCal.exe is compiled with Nuitka (https://nuitka.net),\n"
                 "licensed under the Apache License 2.0.\n")
 
+    # Inspect package files only; NEVER launch the resulting application as a check.
+    for relative in ('DeskCal.exe', 'anki_webview/CardHost.exe'):
+        with open(os.path.join(app, relative), 'rb') as file:
+            if file.read(2) != b'MZ':
+                raise RuntimeError('Missing Windows executable: ' + relative)
+    if not glob.glob(os.path.join(app, '**', '*rsbridge*.pyd'), recursive=True):
+        raise RuntimeError('Official Anki native backend was not included by Nuitka')
+    if os.path.exists(os.path.join(app, 'data')):
+        raise RuntimeError('Refusing to package a personal data directory')
+    build_info = {'version': ver, 'repository': 'https://github.com/Z3O1/DeskCal',
+                  'commit': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
+                  'backend': 'official embedded Anki; independent collection; manual AnkiWeb sync',
+                  'verification': 'compiled and packaged only; no application or tests executed'}
+    with open(os.path.join(app, 'build-info.json'), 'w', encoding='utf-8') as file:
+        json.dump(build_info, file, ensure_ascii=False, indent=2)
+        file.write('\n')
     print("\n[4/4] Zipping ...")
     os.makedirs(DIST, exist_ok=True)
     zpath = os.path.join(DIST, "DeskCal-%s-windows-x64.zip" % ver)

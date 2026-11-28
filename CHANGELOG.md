@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.4.0 — embedded Anki fork (unreleased)
+
+- Replace external AnkiConnect review with the official embedded Anki 26.9.2 core.
+  No installed/running Anki or AnkiConnect is required.
+- Keep an independent collection under DeskCal's data directory, with native
+  scheduling/undo, deck selection, `.apkg` import/export and pre-import backups.
+- Bundle matching reviewer assets; render original templates, typed answers and
+  media in the existing transparent WebView2 host. Desktop add-ons are not loaded.
+- Bundle Windows x64 Python 3.14 core dependencies in the source preview; update
+  standalone build scripts to include the core, metadata, resources and licenses.
+- Preserve upstream MIT notices; embedded integration/combined distribution is
+  AGPL-3.0-or-later, with fork/build sources and upstream source archive included.
+- Add AnkiWeb login, manual collection/media sync, progress/cancellation and
+  explicitly confirmed full-sync directions. Store optional session tokens with
+  user-bound Windows DPAPI, never passwords; no automatic login/sync network calls.
+- Move login, study-deck selection and import/export into the original gear settings;
+  remove the card-page deck menu. Sync is collection-wide, not deck-specific.
+- Add a manual GitHub Actions Windows x64 standalone build (Python 3.12/MSVC),
+  fixed WebView2/Nuitka dependencies, embedded-backend file checks and ZIP/checksum
+  artifacts with source/licenses; no automatic public Release or local deployment.
+- No runtime/GUI/login/sync tests were run, at the user's request.
+
 ## 1.3.2 — 2026-11-14
 
 ### Changed

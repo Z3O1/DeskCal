@@ -29,7 +29,7 @@ import zlib
 from tkinter import filedialog
 from anki_tab import AnkiTab
 
-__version__ = "1.3.2"
+__version__ = "1.4.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 FROZEN = getattr(sys, "frozen", False) or "__compiled__" in globals()   # exe(Nuitka/PyInstaller)
 RES_DIR = getattr(sys, "_MEIPASS", HERE)        # 함께 묶인 파일(글꼴·seeds)이 있는 곳
@@ -5277,6 +5277,7 @@ class DeskCal(tk.Tk):
     def panel_settings(self):
         self.panel_head(self.t("settings"))
         box = self.scroll_area(self.panel)
+        self.anki.render_settings(box)
         if self.update_ver:
             self._upd_btn = self.button(box, self.upd_label(), self.open_release,
                                         "primary", 11)

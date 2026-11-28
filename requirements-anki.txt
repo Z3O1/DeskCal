@@ -1,0 +1,3 @@
+# Official headless core. No Anki desktop, AnkiConnect, Qt, or PyQt required.
+# Keep the reviewer assets and source archive at the matching upstream version.
+anki==26.9.2

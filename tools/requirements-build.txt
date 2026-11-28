@@ -1,7 +1,6 @@
-# Only needed to build DeskCal.exe (tools/build.py). The app itself has no dependencies.
-pyinstaller==6.22.3
-pyinstaller-hooks-contrib==2026.8
-altgraph==0.17.5
-packaging==26.3
-pefile==2024.8.26
-pywin32-ctypes==0.2.3
+# Windows standalone build only; Python 3.12 in GitHub Actions.
+# Runtime dependencies are separately pinned in requirements-anki.txt.
+Nuitka==4.4
+ordered-set==4.1.0
+zstandard==0.25.0
+Pillow==13.0.0

@@ -6,23 +6,90 @@
 <style>
 html, html body, html body.card, html body #qa { background: transparent !important; }
 html { scrollbar-color: var(--fg-subtle) transparent; }
+#deskcal-playback video { max-width: 100%; max-height: 45vh; }
 </style>
 <script>
 (() => {
-  let seq = null, phase = null, signature = null, goodIndex = 2;
+  let seq = null, phase = null, signature = null, goodIndex = 2, current = null;
+  let player = null, audioGeneration = 0, audioIdentity = null;
   const send = action => window.chrome.webview.postMessage({seq, ...action});
-  const flip = () => send({action: 'flip'});
+  const flip = () => send({action: 'flip', answer: document.getElementById('typeans')?.value || ''});
   window.deskcalActivate = flip;
+
+  function stopAudio() {
+    audioGeneration++;
+    if (player) { player.pause(); player.removeAttribute('src'); player.load(); player.remove(); player = null; }
+    window.speechSynthesis?.cancel();
+  }
+  function playAudio(tags) {
+    stopAudio();
+    const generation = audioGeneration;
+    const next = index => {
+      if (generation !== audioGeneration || index >= tags.length) return;
+      const tag = tags[index], done = () => next(index + 1);
+      if (tag.url) {
+        // URLs contain only one encoded basename and are served by the native host.
+        const url = new URL(tag.url, document.baseURI);
+        if (url.origin !== location.origin || !url.pathname.startsWith('/media/')) { done(); return; }
+        const video = /\.(mp4|webm|ogv)(?:$|\?)/i.test(url.pathname);
+        player = document.createElement(video ? 'video' : 'audio');
+        player.src = url.href;
+        player.onended = done;
+        player.onerror = done;
+        if (video) {
+          player.controls = true;
+          document.getElementById('deskcal-playback').replaceChildren(player);
+        }
+        player.play().catch(done);
+      } else if (tag.text && window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(tag.text);
+        utterance.lang = (tag.lang || '').replaceAll('_', '-');
+        utterance.rate = Math.max(0.1, Math.min(10, Number(tag.rate) || 1));
+        const voice = speechSynthesis.getVoices().find(v => (tag.voices || []).includes(v.name));
+        if (voice) utterance.voice = voice;
+        utterance.onend = done;
+        utterance.onerror = done;
+        speechSynthesis.speak(utterance);
+      } else done();
+    };
+    next(0);
+  }
+  function replay(side, index) {
+    if (!current || !['question', 'answer'].includes(phase)) return;
+    const audio = current.audio || {};
+    if (side) {
+      const tags = audio[side] || [];
+      if (Number.isInteger(index) && index >= 0 && index < tags.length) playAudio([tags[index]]);
+    } else {
+      const tags = phase === 'question' ? (audio.question || []) :
+        [...(current.replayQuestion ? audio.question || [] : []), ...(audio.answer || [])];
+      playAudio(tags);
+    }
+  }
   window.pycmd = window.bridgeCommand = (cmd, cb) => {
     if (cmd === 'ans') flip();
-    else if (cmd === 'play' || /^play:[qa]:\d+$/.test(cmd)) send({action: 'audio'});
+    else if (cmd === 'play') replay();
+    else {
+      const match = /^play:([qa]):(\d+)$/.exec(cmd);
+      if (match) replay(match[1] === 'q' ? 'question' : 'answer', Number(match[2]));
+    }
     if (typeof cb === 'function') cb(null);
   };
   window.chrome.webview.addEventListener('message', ({data: card}) => {
+    if (card.command) {
+      if (card.command === 'stop') stopAudio();
+      else if (card.command === 'audio' && card.seq === seq) replay();
+      return;
+    }
     seq = card.seq;
     phase = card.phase;
+    current = card;
     goodIndex = Math.max(0, (card.buttons || []).findIndex(([rating]) => rating === 'good'));
-    if (!['question', 'answer'].includes(phase)) return;
+    if (!['question', 'answer'].includes(phase)) {
+      stopAudio(); audioIdentity = null; signature = null;
+      document.getElementById('qa').replaceChildren();
+      return;
+    }
     const next = JSON.stringify([card.card_id, card.phase, card.html, card.classes, card.theme, card.zoom]);
     if (next === signature) return;
     signature = next;
@@ -34,6 +101,11 @@ html { scrollbar-color: var(--fg-subtle) transparent; }
     else _showAnswer(card.html, classes);
     document.getElementById('qa').style.zoom = String(card.zoom || 1);
     _drawFlag(card.flag || 0);
+    const identity = JSON.stringify([card.card_id, card.phase]);
+    if (identity !== audioIdentity) {
+      stopAudio(); audioIdentity = identity;
+      if (card.autoplay) playAudio((card.audio || {})[phase] || []);
+    }
   });
   document.addEventListener('keydown', e => {
     const editing = !!e.target.closest?.('input,textarea,[contenteditable="true"]');
@@ -45,12 +117,12 @@ html { scrollbar-color: var(--fg-subtle) transparent; }
       if (e.key === 'Enter' && e.target.closest?.('a,button,summary')) return;
       e.preventDefault(); e.stopImmediatePropagation();
       if (phase === 'question') flip();
-      else send({action: 'rate', index: goodIndex});
+      else if (phase === 'answer') send({action: 'rate', index: goodIndex});
     } else if (/^[1-4]$/.test(e.key)) {
       e.preventDefault(); send({action: 'rate', index: Number(e.key) - 1});
-    } else if (e.key.toLowerCase() === 'r') send({action: 'audio'});
+    } else if (e.key.toLowerCase() === 'r') replay();
   }, true);
 })();
 </script>
 <script defer src="/_anki/js/reviewer.js"></script>
-</head><body><div id="_mark" hidden>★</div><div id="_flag" hidden>⚑</div><div id="qa" dir="auto"></div></body></html>
+</head><body><div id="_mark" hidden>★</div><div id="_flag" hidden>⚑</div><div id="qa" dir="auto"></div><div id="deskcal-playback"></div></body></html>

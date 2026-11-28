@@ -12,5 +12,9 @@ dist/
 mingw.zip
 mingw*/
 
+# Rebuildable embedded Anki core/dependencies and official reviewer assets
+anki_vendor/
+anki_webview/assets/
+
 # Generated integration-test captures (not release documentation)
 docs/anki-tab-*.png

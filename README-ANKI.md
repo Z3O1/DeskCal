@@ -1,79 +1,111 @@
-# DeskCal + Anki（fork 开发版）
+# DeskCal · 内置 Anki
 
-基于 [HANSEIDON/DeskCal 1.3.2](https://github.com/HANSEIDON/DeskCal/commit/e6c62fcfae19b317b66a48ba8bb89cca2da216b9)，fork：[Z3O1/DeskCal](https://github.com/Z3O1/DeskCal)。
+在原版 [DeskCal 1.3.2](https://github.com/HANSEIDON/DeskCal) 的 Calendar / Timetable 之间加入 Anki 页。当前 fork 使用 **官方 `anki==26.9.2` 内核**，不是自行实现排程算法，也不再连接外部 Anki 或 AnkiConnect。
 
-## 行为
+## 使用
 
-- 原版 Tk/Win32 窗口、壁纸磨砂、Calendar、Timetable、尺寸及原齿轮设置保留。
-- 顶部新增 `Calendar | Anki | Timetable`。Anki 页始终可以进入；未连接时在页内显示 **“未连接到 Anki”** 和“重新连接”按钮，不启动 Anki、不弹对话框。只有已运行、已打开档案且 AnkiConnect 可用时才显示卡片。
-- 掉线后留在 Anki 页并清除旧卡片，禁用评分。自己打开/重启 Anki 后，点“重新连接”或再点 Anki 页签即可；重连会重新读取本地端口和密钥，不会在后台自动启动复习。
-- Anki 页占满正文，显示原模板 HTML/CSS/JS 和媒体，底部翻面/评分，间隔取自原生排程。背景只在运行时透明，不修改存储的模板。
-- 默认牌组：`英语单词::大学四级英语单词`。不直接打开任何 `collection.anki2`，不复制牌库；评分由 AnkiConnect 调用当前 Anki 的原生排程。
-- 原有 `anki_dark_card/dark.css` 原文只读复用，Zoom（1923741581）当前正/反面缩放配置只读复用。**不保证任意第三方插件都能自动继承**；AnkiConnect 本身不返回通用的 `card_will_show` 最终结果。
-- 浏览器里的空格/Enter 翻面，答案面空格评“良好”；1–4 对应当前提供的评分，R 重播，Ctrl+Z 调用 Anki 撤销。Calendar 中原有撤销逻辑不变。
+1. 打开原齿轮 **设置 → Anki · 账户与牌组**；首次使用会创建 DeskCal 自己的空牌库，不需要先进入 Anki 页。
+2. 在设置中填写 AnkiWeb 邮箱和密码，点 **登录 AnkiWeb**。登录本身不上传或下载数据；点 **立即同步牌库和媒体** 才开始同步。
+3. 在同一区域的 **学习牌组** 下拉框选择要复习的牌组，选择会记住；卡片页不再显示牌组菜单。
+4. 也可以在设置中 **导入牌组 (.apkg)**。从原 Anki 手动导出带学习进度和媒体的 `.apkg` 后导入即可；DeskCal 不直接打开你的原牌库。
+5. 打开 Anki 页，底部翻面、评分。空格 / Enter 翻面，答案面空格评“良好”，1–4 评分，R 重播，Ctrl+Z 撤销。输入答案卡片使用原生答案比较接口。
+6. 设置中的 **导出全部牌组和学习进度** 导出带媒体和进度的 `.apkg`。为避免意外覆盖，目标文件名必须尚不存在。
 
-## 依赖与连接
+关闭外部 Anki 不影响内置模式；DeskCal 也不会替你启动、关闭、重启或修改外部 Anki。原 Calendar / Timetable、壁纸磨砂、尺寸和齿轮设置保持原样。
 
-- Windows 10/11 x64、带 Tkinter 的 Python 3.10+、微软 WebView2 Runtime。
-- 已运行的 Anki；接口使用官方 AnkiConnect 26.11.22.0 的 `/api/v1`（已在 Anki 26.9.2 临时档案验证）。这不是旧的 DeskCal Anki 插件。
-- 不向卡片 JavaScript 传递 API 密钥、排程 token 或媒体文件系统路径。
-- 默认从同一 Windows 用户的 `%APPDATA%/Anki2/addons21/2055492159` **只读**获取本地 AnkiConnect 的端口与密钥，不修改插件文件。远程地址不会自动使用本地密钥。
-- 如需手动配置，在 DeskCal 数据目录放 `anki-connect.json`（源码版为旁边的 `data/`，可通过 `DESKCAL_DIR` 指定）：
+## AnkiWeb 同步与登录安全
 
-```json
-{
-  "endpoint": "http://127.0.0.1:8766/api/v1",
-  "api_key": "你的密钥",
-  "deck": "英语单词::大学四级英语单词"
-}
+- 复用官方内核的登录、增量/全量牌库同步和媒体同步；不使用 AnkiConnect 或自己实现同步协议。只在你点击按钮时联网，不在启动、退出或复习后自动同步。
+- **同步对象是 AnkiWeb 账号中的整个牌库，不是“学习牌组”下拉框所选的一个牌组。** 不直接操作原 Anki 的本地数据库，但云端变更会影响手机和其他客户端的后续同步。
+- 首次连接或结构冲突可能要求全量同步。设置中明确区分 **从 AnkiWeb 下载（覆盖 DeskCal）** 和 **上传 DeskCal（覆盖 AnkiWeb）**，只提供服务端允许的方向；点击后还需再次确认，默认取消。全量不是合并。
+- 上传覆盖可能丢失云端独有的卡片/进度，下载覆盖可能丢失 DeskCal 独有的数据。操作前备份本地牌库，但不能代你备份其他客户端的云端独有内容；必要时先在原客户端完成同步和导出。
+- 牌库和媒体分别显示进度，可取消。取消不会回滚已经完成的同步变更；媒体失败会明确提示，不把“牌库已同步”说成“全部完成”。全量覆盖请求不自动重试。
+- 密码只用于本次登录请求，不存入设置、日志或卡片 WebView。勾选 **记住登录** 时，用 Windows 用户级 DPAPI 加密保存会话令牌；不勾选则只保留在进程内，没有明文文件兜底。不要把令牌文件当作跨机器登录凭据复制。
+- 退出登录清除本机令牌，不删除牌库，也不撤销已完成的云端变更。更换账号会提示，并要求重新确认全量同步方向，避免复用另一账号的同步状态。
+- 所有账户/牌库动作仍在专用线程；仅官方客户端同样使用的 Rust 后端进度/取消 RPC 在监控线程调用，不跨线程操作 Python 牌库对象。同步期间不接收复习评分。
+
+一手实现依据：[固定版本官方同步流程](https://github.com/ankitects/anki/blob/26.09.2/qt/aqt/sync.py)、[媒体监控](https://github.com/ankitects/anki/blob/26.09.2/qt/aqt/mediasync.py)、[Anki 同步说明](https://docs.ankiweb.net/syncing.html)、[Microsoft DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)。
+
+## 数据隔离
+
+内置数据固定在 DeskCal 数据目录下，不扫描或打开 `%APPDATA%/Anki2`：
+
+```text
+DeskCal 数据目录/
+  anki/
+    collection.anki2
+    collection.media/
+    collection.media.db2
+    settings.json
+    ankiweb-auth.bin        # 可选：Windows 用户级 DPAPI 加密令牌，不含密码
+    backups/
+  anki-webview-profile/
 ```
 
-以上以接口已配置为 `8766` 为例。通常不必创建此文件，程序会自动读取 AnkiConnect 的实际端口；手写 `endpoint` 会覆盖自动发现。
+源码版的数据目录为旁边的 `data/`；独立 exe 为 `%LOCALAPPDATA%/DeskCal`；`DESKCAL_DIR` 可以指定整个 DeskCal 数据目录，但不能单独指定外部 collection 路径。
 
-可选项 `addons_dir` 指定插件目录，`web_assets` 指定当前 Anki 的 `_aqt/data/web` 目录。密钥/个人配置不得提交或打包。
+内核操作在一个专用线程内串行执行；评分使用官方 `get_queued_cards` / `build_answer` / `answer_card`，不直接写 SQL。会话和状态标记阻止重复/过期评分，评分失败不会自动重试写入。导入前生成内核备份；自动备份不包含媒体，需要完整备份时使用导出功能。原版 Calendar 的备份功能仍只负责原版数据，不代替 Anki 导出。
 
-如果 Anki 已开却仍未连接，请检查端口是否被其他网页服务占用；`HTTPError 404` 不等于 Anki 已关闭。调整 AnkiConnect 端口后需自行重启 Anki，再点“重新连接”。不要擅自关闭占用端口的其他服务。
+## 卡面与兼容边界
 
-## 构建
+- 使用内核渲染的原模板 HTML/CSS，沿用透明 WebView2 卡片宿主和同版本官方 reviewer.js；资源随 DeskCal 携带，不再从外部 Anki 取文件。
+- 支持普通卡片、挖空、模板 JavaScript、输入答案、媒体及原生排程。HTML5 音视频支持取决于 WebView2 编解码器；TTS 使用系统浏览器语音，声音和桌面 Anki 的 mpv/TTS 可能不同。
+- 不加载外部桌面插件，也不自动读取 dark-card / Zoom 的配置。需要的样式应随自己的模板导入。
+- 已接入设置内的 AnkiWeb 登录、手动牌库/媒体同步；当前不提供卡片编辑器、桌面插件管理或自建同步服务器配置。
+- 自定义排程 JavaScript 暂不支持，检测到时阻止复习，而不是悄悄按另一套规则评分。
+- 导入/导出当前只接受 `.apkg`；不接受 `.anki2`、`.colpkg` 原地替换整个牌库。只导入你信任的模板，模板 JavaScript 会在卡片 WebView 内运行。
+- 卡片 JavaScript 无法取得牌库路径、排程 token 或任意文件访问接口；媒体由原生宿主从内置媒体目录提供，不新增 HTTP 监听器。
 
-微软 SDK 版本为 `Microsoft.Web.WebView2 1.0.3856.49`。准备包含以下文件的目录：
+## 源码预览包
 
-- `Microsoft.Web.WebView2.Core.dll`（SDK 的 .NET Framework 版本）
-- `WebView2Loader.dll`（x64）
-- `WEBVIEW2-LICENSE.txt`（SDK 原许可证）
+现有 `dist/DeskCal-Anki-embedded-source.zip` 面向 **Windows x64 + Python 3.14（含 Tk）+ WebView2 Runtime**，随包携带：
+
+- 官方 Windows Anki 内核及依赖，不用另外安装 Anki / AnkiConnect；
+- 官方同版本 reviewer 静态资源；
+- 已编译的 WebView2 宿主及 SDK DLL；
+- 原版字体、源码、许可证、上游 Anki 源码归档及 SHA-256 清单。
+
+源码预览包**不是免 Python 的独立安装版**。解压到固定的 Windows 本地目录，运行 `DeskCal.bat`；不要从 WSL UNC 路径运行（旧记录中 Windows 无法从该路径加载部分字体）。不要覆盖原版的数据目录；若旧 DeskCal 正在运行，由你自行退出后再运行，以免单实例机制召回旧窗口。
+
+其他 Python 版本可以在对应环境安装 `python -m pip install -r requirements-anki.txt`，或重新生成匹配的 vendor 目录。启动器优先使用已随包附带依赖的 Python 3.14；不会自动联网安装依赖。
+
+首次正常启动仍按原有已确认策略默认启用开机启动；更新只跟随 `Z3O1/DeskCal`，不会安装旧上游版本。
+
+## GitHub Actions 构建独立版
+
+在仓库的 **Actions → Build Windows (embedded Anki) → Run workflow** 手动触发：
+
+```text
+gh workflow run build-windows.yml --repo Z3O1/DeskCal --ref main
+```
+
+云端使用 Windows 2022 / Python 3.12 / MSVC，下载固定版本 WebView2 SDK，编译宿主并用固定版本 Nuitka 打包。成功后从该次运行的 **Artifacts → DeskCal-Windows-x64-…** 下载 ZIP 和 SHA-256；解压得到 `DeskCal/DeskCal.exe`，无需另外安装 Python 或 Anki，仍需系统 WebView2 Runtime。
+
+产物同时携带内核扩展、资源、许可证、对应源码和构建信息。仅编译与文件检查，不启动 exe、不运行任何测试、登录或真实同步，也不会自动发布 Release 或覆盖本机版本。
+
+## 本地构建说明
+
+Windows 编译环境使用 Python 3.12（与 Actions 相同）。准备包含 `Microsoft.Web.WebView2.Core.dll`、x64 `WebView2Loader.dll`、`WEBVIEW2-LICENSE.txt` 的 SDK 目录（SDK 1.0.3856.49）。Windows 下运行：
 
 ```text
 python tools/build_anki_host.py --sdk SDK目录
 python tools/build.py --anki-host build/anki-host
 ```
 
-原版 Nuitka 构建流程保留，额外携带透明宿主、SDK DLL/许可证和 HTML 外壳；卡片资源使用本机已安装的 Anki，不另复制 Anki 的网页资源。
+独立 Nuitka 构建会在隔离环境安装固定版本内核，随包携带 Python、内核、本机扩展和卡片资源，不依赖外部 Anki。`prepare_anki_assets.py` 只下载/提取 aqt wheel 的静态资源，不安装 Qt 或启动 Anki GUI。
 
-用户已确认：保留原版正常首次运行时默认开启开机启动，只检查 `Z3O1/DeskCal` 的发布；旧上游的更新缓存会失效，不会拿原版安装包覆盖融合版。当前开发过程没有写入 Windows 启动项。
-
-**开发状态：最终 Windows 本地安装验收尚未完成。** 保留原版数据目录和单实例机制；若原版 DeskCal 正在运行，需由你自行退出后再运行 fork，否则启动器可能召回原版窗口。不会自动关闭原版或 Anki。
-
-### 源码预览包（不是独立安装版）
+仅生成源码预览包（可在 Linux 下载和组装，不执行 Windows 文件）：
 
 ```text
+python tools/prepare_anki_assets.py
+python tools/prepare_anki_vendor.py --python-version 3.14
 python tools/package_anki_preview.py --host build/anki-host
 ```
 
-生成 `dist/DeskCal-Anki-preview-source.zip`，携带原版字体和已编译的 WebView2 宿主，不携带 Python、个人配置或牌库。包内含文件 SHA-256 清单，旁边生成 ZIP 的校验文件。
+`anki_webview/assets/`、`anki_vendor/`、`build/`、`dist/` 为可重建产物，不提交个人数据。
 
-如需自行预览，应先解压到固定的 **Windows 本地磁盘目录**，不要从 WSL UNC 路径运行（Windows 曾拒绝从该路径加载随附字体）。先自行启动已加载 AnkiConnect 的 Anki，再运行 `DeskCal.bat`。首次正常启动会按已确认策略设置开机启动；这一步不是开发测试，当前没有代你执行。
+## 许可与验证状态
 
-## 不占用桌面的测试
+原版 DeskCal 的 MIT 声明保留在 `LICENSE`。内置 Anki 集成及组合发行遵循 AGPL-3.0-or-later，完整许可见 `COPYING`、`LICENSING.md` 和 `THIRD_PARTY_NOTICES.md`。分发时请保留源码、构建脚本和依赖声明，并核对相应依赖的许可要求。
 
-禁止在用户当前 Windows 桌面跑 GUI/截图/键鼠测试。使用 Linux 的独立环境：
-
-```text
-python tools/test_anki_headless.py --ankiconnect 官方AnkiConnect源码目录
-# 可选：--dark-card 现有anki_dark_card源码目录
-```
-
-测试进程强制 `QT_QPA_PLATFORM=offscreen`，移除 DISPLAY/Wayland，使用临时档案、随机端口和测试密钥。
-
-已覆盖：原导航方法与控制器的纯逻辑、离线页/明确重试/掉线清卡、真实 HTTP 翻面/评分、revlog 只增加一次、过期评分拒绝、dark-card 最终 HTML 逐字对照、JS/媒体、正背 sessionStorage、透明 CSS、缩放与重连防护、fork 更新 URL/旧缓存隔离和默认开机启动代码。`--dark-card` 可对照现有插件；未指定时使用合成 CSS 夹具，不依赖个人文件。
-
-**未由无界面测试证明：** 最终 Windows 原生合成、焦点、字体加载和安装包显示。此前可见桌面测试已停止；原版回归 326/329，3 项字体失败的日志显示 Windows 未能从 WSL UNC 路径加载原版 Noto 字体。字体代码和资源未改，需另行授权的隔离 Windows 环境复验，不能用 headless 结果冒充。
+**按用户要求，不运行应用、单元/集成测试、Windows GUI、截图或键鼠自动化。** 没有实际登录任何 AnkiWeb 账号、调用 DPAPI 或执行联网同步。GitHub Actions 只执行云端编译、打包和文件完整性检查；本机不启动 Windows 编译器。编译成功不代表运行验收通过，历史 AnkiConnect 测试也不能证明当前内置实现或同步正确。安装/覆盖本机版本需要另行明确授权。

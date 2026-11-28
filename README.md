@@ -1,4 +1,4 @@
-> **Anki fork 开发版：** 在原版 DeskCal 中新增 Anki 页签。实现、依赖与验证状态见 [README-ANKI.md](README-ANKI.md)。下文原版 Releases 不包含此功能。
+> **内置 Anki fork 1.4.0（未发布）：** 随包携带官方 Anki 内核和独立牌库；在原齿轮设置中登录 AnkiWeb、同步、选择牌组及导入导出，不需要外部 Anki / AnkiConnect。使用与构建见 [README-ANKI.md](README-ANKI.md)，组合发行许可见 [LICENSING.md](LICENSING.md)。下文为原版介绍，原版 Releases 不包含此功能。
 
 <div align="center">
 
@@ -83,7 +83,7 @@ The hash should match the one on the release page.
 
 1. Install [Python 3](https://www.python.org/downloads/windows/) with the default options.
 2. Download this repo (**Code → Download ZIP**) or `git clone https://github.com/HANSEIDON/DeskCal.git`.
-3. Double-click **`DeskCal.bat`**. No packages to install.
+3. For the upstream calendar, double-click **`DeskCal.bat`**. This embedded-Anki fork additionally needs the bundled core/assets or the preparation steps in [README-ANKI.md](README-ANKI.md).
 
 ### Start with Windows
 
@@ -234,7 +234,9 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## 📄 License
 
-[MIT](LICENSE). Bundled third-party components (Noto Sans CJK SC font, Python runtime,
-Tcl/Tk) are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+The original calendar/timetable remains [MIT](LICENSE). The embedded Anki integration
+and combined distribution are AGPL-3.0-or-later; see [LICENSING.md](LICENSING.md) and
+[COPYING](COPYING). Bundled components are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 DeskCal is an independent project and is not affiliated with Peking University.
